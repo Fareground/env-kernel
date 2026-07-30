@@ -1,0 +1,938 @@
+{
+  "live_capabilities": {
+    "domain_modules": [
+      "backgammon",
+      "battleship",
+      "board",
+      "chess",
+      "deck",
+      "dispute_trial",
+      "dominoes",
+      "ecological",
+      "economic",
+      "hand",
+      "health",
+      "hidden_state",
+      "judged_contest",
+      "mafia",
+      "monopoly",
+      "parliament",
+      "poker",
+      "political",
+      "prediction_market",
+      "securities_trading",
+      "slots",
+      "state_machine",
+      "tic_tac_toe",
+      "trade",
+      "turn_manager",
+      "united_nations"
+    ],
+    "effect_operations": [
+      "add",
+      "advance_track",
+      "apply_status",
+      "award_xp",
+      "claim_slot",
+      "conditional",
+      "consume_token",
+      "craft_item",
+      "despawn_entity",
+      "discard_from_hand",
+      "draw_from_deck",
+      "draw_to_hand",
+      "drop_item",
+      "emit_event",
+      "follow_entity",
+      "for_each",
+      "give_item",
+      "grant_token",
+      "invoke_action",
+      "kill",
+      "modify_relation",
+      "move_to",
+      "multiply",
+      "pass_card",
+      "pickup_item",
+      "place_on_board",
+      "play_card",
+      "post_content",
+      "react_content",
+      "release_slot",
+      "remove_status",
+      "reset_board",
+      "sequence",
+      "set",
+      "set_relation",
+      "share_content",
+      "spawn_entity",
+      "subtract",
+      "take_item",
+      "transfer_resource",
+      "unfollow_entity",
+      "use_held_card"
+    ],
+    "phase_handlers": [
+      "assign_properties",
+      "card_deal",
+      "collect_antes",
+      "community_cards",
+      "poker_showdown",
+      "reset_deck",
+      "reset_field",
+      "setup_placement"
+    ],
+    "precondition_operators": [],
+    "resolution_archetypes": [
+      "auction_dutch",
+      "auction_english",
+      "auction_sealed_first",
+      "auction_sealed_second",
+      "contest",
+      "cpmm",
+      "deterministic",
+      "deterministic_math",
+      "evidence_chain",
+      "market_impact",
+      "order_book",
+      "skill_check",
+      "voting"
+    ],
+    "termination_check_types": [
+      "all_dead",
+      "all_goals_complete",
+      "bankruptcy",
+      "compound_and",
+      "compound_or",
+      "count_property",
+      "event_triggered",
+      "expr",
+      "faction_win",
+      "first_to_score",
+      "last_one_standing",
+      "property_threshold",
+      "resource_exhausted",
+      "round_limit",
+      "rounds_idle",
+      "score_after_n_rounds",
+      "vote_threshold"
+    ]
+  },
+  "notes": [
+    "PREFER `expr` strings ('$actor.gold >= 100 && $actor.alive') for any guard (precondition, effect.condition, termination). Single grammar, fewer pitfalls.",
+    "Built-in effect operations and EVERY registered custom op live in `live_capabilities.effect_operations` \u2014 there is no hidden vocabulary.",
+    "Always include at least one entity_type with role='agent' and at least one action whose actor_type matches it \u2014 otherwise nobody can act.",
+    "termination_conditions are optional but recommended; without one the game only stops at engine.max_rounds.",
+    "Domain modules (chess, monopoly, prediction_market, \u2026) are referenced by name \u2014 DO NOT emit Python. Pick from `live_capabilities.domain_modules`.",
+    "Visualization is the ONLY thing an env-builder agent generates as code \u2014 and even that is sandboxed Konva. Game logic is always declarative JSON."
+  ],
+  "template_schema": {
+    "$defs": {
+      "ActionSpec": {
+        "additionalProperties": true,
+        "properties": {
+          "actor_type": {
+            "default": "",
+            "title": "Actor Type",
+            "type": "string"
+          },
+          "cooldown_rounds": {
+            "default": 0,
+            "title": "Cooldown Rounds",
+            "type": "integer"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "effects_on_failure": {
+            "items": {
+              "$ref": "#/$defs/EffectSpec"
+            },
+            "title": "Effects On Failure",
+            "type": "array"
+          },
+          "effects_on_partial": {
+            "items": {
+              "$ref": "#/$defs/EffectSpec"
+            },
+            "title": "Effects On Partial",
+            "type": "array"
+          },
+          "effects_on_success": {
+            "items": {
+              "$ref": "#/$defs/EffectSpec"
+            },
+            "title": "Effects On Success",
+            "type": "array"
+          },
+          "interruptible": {
+            "default": true,
+            "title": "Interruptible",
+            "type": "boolean"
+          },
+          "message_action": {
+            "default": false,
+            "title": "Message Action",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "parameters": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Parameters",
+            "type": "array"
+          },
+          "preconditions": {
+            "items": {
+              "$ref": "#/$defs/PreconditionSpec"
+            },
+            "title": "Preconditions",
+            "type": "array"
+          },
+          "requires_action": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Requires Action"
+          },
+          "requires_action_success": {
+            "default": true,
+            "title": "Requires Action Success",
+            "type": "boolean"
+          },
+          "resolution_archetype": {
+            "default": "deterministic",
+            "title": "Resolution Archetype",
+            "type": "string"
+          },
+          "resolution_params": {
+            "additionalProperties": true,
+            "title": "Resolution Params",
+            "type": "object"
+          },
+          "sequence_rounds": {
+            "default": 0,
+            "title": "Sequence Rounds",
+            "type": "integer"
+          },
+          "target_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Target Type"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ActionSpec",
+        "type": "object"
+      },
+      "DomainModuleSpec": {
+        "additionalProperties": true,
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": true,
+            "title": "Params",
+            "type": "object"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "DomainModuleSpec",
+        "type": "object"
+      },
+      "EffectConditionSpec": {
+        "additionalProperties": true,
+        "properties": {
+          "check_type": {
+            "default": "property",
+            "title": "Check Type",
+            "type": "string"
+          },
+          "expr": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expr"
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Field"
+          },
+          "operator": {
+            "default": "gte",
+            "title": "Operator",
+            "type": "string"
+          },
+          "subject": {
+            "default": "actor",
+            "title": "Subject",
+            "type": "string"
+          },
+          "value": {
+            "default": null,
+            "title": "Value"
+          }
+        },
+        "title": "EffectConditionSpec",
+        "type": "object"
+      },
+      "EffectSpec": {
+        "additionalProperties": true,
+        "properties": {
+          "condition": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/EffectConditionSpec"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Field"
+          },
+          "operation": {
+            "title": "Operation",
+            "type": "string"
+          },
+          "relation_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Relation Type"
+          },
+          "resource": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Resource"
+          },
+          "scale_by_magnitude": {
+            "default": false,
+            "title": "Scale By Magnitude",
+            "type": "boolean"
+          },
+          "target": {
+            "default": "actor",
+            "title": "Target",
+            "type": "string"
+          },
+          "value": {
+            "default": null,
+            "title": "Value"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "title": "EffectSpec",
+        "type": "object"
+      },
+      "EntitySpec": {
+        "additionalProperties": true,
+        "properties": {
+          "alive": {
+            "default": true,
+            "title": "Alive",
+            "type": "boolean"
+          },
+          "entity_type": {
+            "title": "Entity Type",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "location_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Location Id"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "properties": {
+            "additionalProperties": true,
+            "title": "Properties",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "entity_type"
+        ],
+        "title": "EntitySpec",
+        "type": "object"
+      },
+      "EntityTypeSpec": {
+        "additionalProperties": true,
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "properties": {
+            "items": {
+              "$ref": "#/$defs/PropertySpec"
+            },
+            "title": "Properties",
+            "type": "array"
+          },
+          "role": {
+            "default": "agent",
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "EntityTypeSpec",
+        "type": "object"
+      },
+      "PreconditionSpec": {
+        "additionalProperties": true,
+        "description": "Either an expression string (``expr``) OR legacy structured form.",
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "expr": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Expr"
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Field"
+          },
+          "operator": {
+            "default": "gte",
+            "title": "Operator",
+            "type": "string"
+          },
+          "relation_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Relation Type"
+          },
+          "resource": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Resource"
+          },
+          "subject": {
+            "default": "actor",
+            "title": "Subject",
+            "type": "string"
+          },
+          "value": {
+            "default": null,
+            "title": "Value"
+          }
+        },
+        "title": "PreconditionSpec",
+        "type": "object"
+      },
+      "PropertySpec": {
+        "additionalProperties": true,
+        "properties": {
+          "default": {
+            "default": null,
+            "title": "Default"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "enum_values": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Enum Values"
+          },
+          "hidden": {
+            "default": false,
+            "title": "Hidden",
+            "type": "boolean"
+          },
+          "max_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Value"
+          },
+          "min_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Min Value"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "type": {
+            "default": "float",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "PropertySpec",
+        "type": "object"
+      },
+      "ResourceTypeSpec": {
+        "additionalProperties": true,
+        "properties": {
+          "conservation": {
+            "default": true,
+            "title": "Conservation",
+            "type": "boolean"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "discrete": {
+            "default": true,
+            "title": "Discrete",
+            "type": "boolean"
+          },
+          "initial_supply": {
+            "default": 0,
+            "title": "Initial Supply",
+            "type": "number"
+          },
+          "max_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Value"
+          },
+          "min_value": {
+            "default": 0.0,
+            "title": "Min Value",
+            "type": "number"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ResourceTypeSpec",
+        "type": "object"
+      },
+      "TerminationSpec": {
+        "additionalProperties": true,
+        "properties": {
+          "check_type": {
+            "default": "expr",
+            "title": "Check Type",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": true,
+            "title": "Params",
+            "type": "object"
+          },
+          "sub_conditions": {
+            "items": {
+              "$ref": "#/$defs/TerminationSpec"
+            },
+            "title": "Sub Conditions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "TerminationSpec",
+        "type": "object"
+      }
+    },
+    "additionalProperties": true,
+    "description": "The canonical contract for a runnable game \u2014 agent target.\n\nEvery game in the system, including the built-in\n``assets/<game>/template.json`` files, conforms to this shape.",
+    "properties": {
+      "actions": {
+        "items": {
+          "$ref": "#/$defs/ActionSpec"
+        },
+        "title": "Actions",
+        "type": "array"
+      },
+      "adjacency": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "title": "Adjacency",
+        "type": "array"
+      },
+      "cognitive_config": {
+        "additionalProperties": true,
+        "title": "Cognitive Config",
+        "type": "object"
+      },
+      "connectors": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "title": "Connectors",
+        "type": "array"
+      },
+      "contract_version": {
+        "default": "1.0",
+        "title": "Contract Version",
+        "type": "string"
+      },
+      "crowd_config": {
+        "additionalProperties": true,
+        "title": "Crowd Config",
+        "type": "object"
+      },
+      "derived_rules": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "title": "Derived Rules",
+        "type": "array"
+      },
+      "description": {
+        "default": "",
+        "title": "Description",
+        "type": "string"
+      },
+      "domain_modules": {
+        "items": {
+          "$ref": "#/$defs/DomainModuleSpec"
+        },
+        "title": "Domain Modules",
+        "type": "array"
+      },
+      "entities": {
+        "items": {
+          "$ref": "#/$defs/EntitySpec"
+        },
+        "title": "Entities",
+        "type": "array"
+      },
+      "entity_types": {
+        "items": {
+          "$ref": "#/$defs/EntityTypeSpec"
+        },
+        "title": "Entity Types",
+        "type": "array"
+      },
+      "factions": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "title": "Factions",
+        "type": "array"
+      },
+      "goals": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "title": "Goals",
+        "type": "array"
+      },
+      "initial_relations": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "title": "Initial Relations",
+        "type": "array"
+      },
+      "initial_skills": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "title": "Initial Skills",
+        "type": "array"
+      },
+      "last_runtime_params": {
+        "additionalProperties": true,
+        "title": "Last Runtime Params",
+        "type": "object"
+      },
+      "location_definitions": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "title": "Location Definitions",
+        "type": "array"
+      },
+      "name": {
+        "default": "untitled_world",
+        "title": "Name",
+        "type": "string"
+      },
+      "recipes": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "title": "Recipes",
+        "type": "array"
+      },
+      "relation_types": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "title": "Relation Types",
+        "type": "array"
+      },
+      "resource_holdings": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "title": "Resource Holdings",
+        "type": "array"
+      },
+      "resource_types": {
+        "items": {
+          "$ref": "#/$defs/ResourceTypeSpec"
+        },
+        "title": "Resource Types",
+        "type": "array"
+      },
+      "resource_unallocated": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "title": "Resource Unallocated",
+        "type": "array"
+      },
+      "runtime_parameters": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "title": "Runtime Parameters",
+        "type": "array"
+      },
+      "skill_definitions": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "title": "Skill Definitions",
+        "type": "array"
+      },
+      "social_config": {
+        "additionalProperties": true,
+        "title": "Social Config",
+        "type": "object"
+      },
+      "spatial": {
+        "additionalProperties": true,
+        "title": "Spatial",
+        "type": "object"
+      },
+      "tables": {
+        "additionalProperties": true,
+        "title": "Tables",
+        "type": "object"
+      },
+      "temporal": {
+        "additionalProperties": true,
+        "title": "Temporal",
+        "type": "object"
+      },
+      "termination_conditions": {
+        "items": {
+          "$ref": "#/$defs/TerminationSpec"
+        },
+        "title": "Termination Conditions",
+        "type": "array"
+      },
+      "triggers": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "title": "Triggers",
+        "type": "array"
+      },
+      "visibility_rules": {
+        "items": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "title": "Visibility Rules",
+        "type": "array"
+      },
+      "viz": {
+        "additionalProperties": true,
+        "title": "Viz",
+        "type": "object"
+      }
+    },
+    "title": "WorldTemplate",
+    "type": "object"
+  },
+  "version": "1.0"
+}

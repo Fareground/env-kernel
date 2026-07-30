@@ -1,0 +1,71 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fg-env-kernel"
+version = "0.1.0"
+description = "Game-agnostic simulation kernel for building agent environments."
+readme = "README.md"
+requires-python = ">=3.11"
+keywords = ["simulation", "kernel", "agents", "environments", "game-engine", "ai"]
+license = { text = "Apache-2.0" }
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Games/Entertainment :: Simulation",
+]
+dependencies = [
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.8", "build>=1.0"]
+
+[project.urls]
+Repository = "https://github.com/Fareground/env-kernel"
+
+[project.scripts]
+fg-env-kernel = "fg_env_kernel.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fg_env_kernel"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src"]
+
+[tool.ruff.lint]
+# Conservative ruleset for now — kernel is legacy code being extracted.
+# Tighten over time. Run `ruff check --statistics .` to see what's noisy.
+select = ["E", "F", "W"]
+ignore = [
+    "E501",  # line-too-long — many long expression strings
+    "E731",  # lambda assignments — used intentionally
+    "E741",  # ambiguous names (l, I, O) — present in math-heavy code
+    "F401",  # unused imports — re-exports in __init__.py
+    "F403",  # star imports — used in __init__.py for convenience
+    "F405",  # name may be undefined from star — same as above
+    "F811",  # redefinition — used for overload-style patterns
+    "F841",  # unused locals — debugging variables left intentionally
+    "E701",  # multiple statements on one line (colon) — legacy compact style
+    "E702",  # multiple statements on one line (semicolon)
+    "E402",  # module-level import not at top — legacy lazy-import pattern
+    "W293",  # whitespace on blank lines — formatting noise
+    "F821",  # undefined-name — forward-reference strings (resolved at runtime)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["fg_env_kernel"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

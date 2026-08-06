@@ -1,16 +1,19 @@
 """Runtime — the engine + tick loop + dispatch.
 
-This subpackage holds the core simulation runtime:
+This subpackage holds the core simulation runtime, one concern per file:
 
-  engine.py          — SimulationEngine god class (TODO: extract methods below)
-  effect_dispatch.py — _apply_effects extraction point
-  perception.py      — _build_agent_perception extraction point
-  triggers.py        — _emit_event + cascade extraction point
+  engine.py          — SimulationEngine: the tick loop, phases, lifecycle
+  turn.py            — one agent's turn: perceive, decide, resolve, apply
+  actions.py         — action name -> definition, param coercion, resolution
+  effect_dispatch.py — applying a list of Effects to the world state
+  conditions.py      — condition/predicate evaluation and comparison
+  perception.py      — assembling what an agent sees on its turn
+  triggers.py        — event emission and the trigger cascade
+  termination.py     — when a run ends and who won
 
-The engine.py file is currently still the main 3,876-line class. Future
-extractions move specific methods (effect dispatch, perception
-assembly, trigger cascade) into focused files alongside engine.py.
-Today they re-export from engine for backwards-compat.
+``SimulationEngine`` keeps a thin delegating method for each extracted
+body, so code calling ``engine._foo(...)`` directly still works. New
+callers should import the module-level function instead.
 """
 from .engine import (
     SimulationEngine,

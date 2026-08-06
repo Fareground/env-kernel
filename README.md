@@ -10,6 +10,7 @@
 *A deterministic simulation kernel for agent environments — LLMs are brains, code is physics.*
 
 <p>
+  <a href="https://github.com/Fareground/env-kernel/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/Fareground/env-kernel/ci.yml?branch=main&style=flat-square&label=CI" /></a>
   <img alt="Python" src="https://img.shields.io/badge/python-3.11+-3b82f6?style=flat-square" />
   <img alt="Dependencies" src="https://img.shields.io/badge/deps-pydantic%20only-2dd4a7?style=flat-square" />
   <img alt="Engine" src="https://img.shields.io/badge/engine-deterministic-9b59b6?style=flat-square" />
@@ -98,7 +99,7 @@ src/fg_env_kernel/
   pipeline/       compile · lint · smoke · replay · package
 ```
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full API surface and the [`CHANGELOG`](CHANGELOG.md) for what's new.
+See the [`CHANGELOG`](CHANGELOG.md) for what's new.
 
 ## Contributing
 

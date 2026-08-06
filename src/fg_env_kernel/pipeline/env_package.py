@@ -16,7 +16,7 @@ This module owns the **canonical I/O** for that format:
   unpack(archive, dir)     — extract a .simworld into a directory
   scaffold_env(path, name) — create a minimal skeleton
 
-See docs/ENV_PACKAGE.md for the full format spec.
+The package layout is defined by the loader and scaffold in this module.
 """
 from __future__ import annotations
 

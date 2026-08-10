@@ -171,7 +171,7 @@ def _load_env_primitives(prim_dir: Path) -> None:
 
     Ensures ``sys.modules['kernel']`` aliases to the active kernel
     instance during loading. Without this, env primitives that
-    ``from kernel import effect`` would register in a DIFFERENT
+    ``from fg_env_kernel import effect`` would register in a DIFFERENT
     registry instance than the one the rest of the kernel uses —
     silently invisible.
     """

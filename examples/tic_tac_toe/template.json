@@ -1,0 +1,46 @@
+{
+  "name": "Tic-Tac-Toe",
+  "description": "Classic 3x3 tic-tac-toe. Two players alternate placing marks; three in a row (row, column, or diagonal) wins.",
+  "entity_types": [
+    {
+      "name": "Player",
+      "role": "agent",
+      "description": "A tic-tac-toe player.",
+      "properties": [
+        {"name": "mark", "type": "string", "default": "", "description": "The mark this player places (X or O)."}
+      ]
+    }
+  ],
+  "entities": [
+    {"id": "player_x", "entity_type": "Player", "name": "Player X", "properties": {"mark": "X"}},
+    {"id": "player_o", "entity_type": "Player", "name": "Player O", "properties": {"mark": "O"}}
+  ],
+  "domain_modules": [
+    {
+      "name": "board",
+      "params": {"id": "main", "kind": "grid", "rows": 3, "cols": 3, "auto_marks": ["X", "O"]}
+    }
+  ],
+  "actions": [
+    {
+      "name": "place_mark",
+      "description": "Place your mark on an empty cell. Cells are numbered 1-9, top-left to bottom-right.",
+      "actor_type": "Player",
+      "parameters": [
+        {"name": "cell", "type": "int", "min": 1, "max": 9, "description": "Target cell (1-9)."}
+      ],
+      "effects_on_success": [
+        {"operation": "place_on_board", "target": "actor", "field": "main", "value": "$actor.mark"}
+      ]
+    }
+  ],
+  "termination_conditions": [
+    {
+      "name": "three_in_a_row",
+      "description": "A player completed a row, column, or diagonal.",
+      "check_type": "board_pattern",
+      "params": {"board_id": "main", "patterns": ["row_3", "col_3", "diag_3"]}
+    }
+  ],
+  "temporal": {"max_rounds": 9}
+}

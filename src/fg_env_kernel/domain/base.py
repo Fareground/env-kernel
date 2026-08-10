@@ -201,12 +201,20 @@ class DomainModuleRegistry:
         # The asset loader handles dynamic imports and registration name resolution.
         try:
             from assets import register_modules as _register_asset_modules
-            _register_asset_modules(self)
-        except Exception:  # pragma: no cover — defensive at startup
-            import logging
-            logging.getLogger(__name__).exception(
-                "Failed to load asset-side domain modules; only built-in stubs are available."
-            )
+        except ImportError:
+            # No `assets` package providing register_modules on the path
+            # (a bare assets/ media directory also lands here as a
+            # namespace package) — normal for the published library;
+            # downstream apps that ship one get it auto-loaded.
+            pass
+        else:
+            try:
+                _register_asset_modules(self)
+            except Exception:  # pragma: no cover — defensive at startup
+                import logging
+                logging.getLogger(__name__).exception(
+                    "Failed to load asset-side domain modules; only built-in stubs are available."
+                )
         # Studio-built environments carry their DomainModule source on
         # the WorldDefinition row and are registered at run time by the
         # sim worker — no disk discovery needed (see

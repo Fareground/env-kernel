@@ -130,10 +130,10 @@ class Kernel:
         """Build a runnable ``World`` from a template dict (or a
         pre-validated ``WorldTemplate``).
 
-        ``max_rounds`` resolution order: explicit argument, then the
-        template's ``temporal.max_rounds``, then the engine default.
+        The loader honors the template's ``temporal.max_rounds``; an
+        explicit ``max_rounds`` argument overrides it.
         """
-        from .pipeline.loader import WorldTemplate, load_world
+        from .pipeline.loader import load_world
 
         state, engine = load_world(
             template,
@@ -141,13 +141,6 @@ class Kernel:
             decision_fn=decision_fn,
             on_event=on_event,
         )
-        if max_rounds is None:
-            schema = (
-                template.model_dump()
-                if isinstance(template, WorldTemplate)
-                else template
-            )
-            max_rounds = (schema.get("temporal") or {}).get("max_rounds")
         if max_rounds is not None:
             engine.max_rounds = int(max_rounds)
         return World(state, engine)

@@ -24,7 +24,6 @@ import json
 import logging
 import os
 import shutil
-import sys
 import tempfile
 import zipfile
 from dataclasses import dataclass, field
@@ -167,40 +166,15 @@ def _load_directory(directory: Path, *, load_primitives: bool) -> EnvPackage:
 
 def _load_env_primitives(prim_dir: Path) -> None:
     """Import every .py file in the env's primitives/ directory so the
-    @effect / @termination / etc. decorators fire and register.
-
-    Ensures ``sys.modules['kernel']`` aliases to the active kernel
-    instance during loading. Without this, env primitives that
-    ``from fg_env_kernel import effect`` would register in a DIFFERENT
-    registry instance than the one the rest of the kernel uses —
-    silently invisible.
+    @effect / @termination / etc. decorators fire and register in the
+    process-global registry (primitives import ``fg_env_kernel``
+    directly, so they register in the same registry the engine reads).
     """
     from ..primitives_loader import _load_dir
-    # Walk up from this file (pipeline/env_package.py) two levels to
-    # find the kernel package itself, then ensure ``kernel`` maps to it.
-    import fg_env_kernel as _active_kernel
-    aliased = False
-    if sys.modules.get("kernel") is not _active_kernel:
-        # Save the prior value if any; restore after load (best-effort)
-        _prior = sys.modules.get("kernel")
-        sys.modules["kernel"] = _active_kernel
-        aliased = True
     try:
         _load_dir(prim_dir)
     except Exception:
         logger.exception("env primitive load failed: %s", prim_dir)
-    finally:
-        # Restore the prior alias. If a primitive's import is cached
-        # under `kernel.X`, we leave it — those imports already
-        # resolved against the active kernel.
-        if aliased:
-            if _prior is None:
-                # We added the alias; leaving it in place is safe
-                # (it just points at the right module) and keeps any
-                # cached `kernel.X` imports valid.
-                pass
-            else:
-                sys.modules["kernel"] = _prior
 
 
 # ---------------------------------------------------------------------------

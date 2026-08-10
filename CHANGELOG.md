@@ -7,7 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **BREAKING: primitives auto-discovery no longer runs at import time.**
+  `import fg_env_kernel` no longer scans `kernel_primitives/` directories or
+  imports arbitrary `.py` files. Downstream code must either call
+  `fg_env_kernel.discover()` explicitly or set `KERNEL_PRIMITIVES_DIR`
+  (an explicitly configured directory is still honored at import).
+- `load_world()` now honors the template's `temporal.max_rounds` and passes it
+  to the engine (previously silently ignored; the engine default of 100 applied).
+- `SimulationEngine.run()` is resume-aware: after prior `step()` calls it runs
+  only the remaining round budget and emits `simulation_start` /
+  `simulation_end` exactly once per engine lifetime.
+
 ### Added
+- **SDK facade.** `Kernel(seed=...).load(template) -> World` — a thin typed
+  wrapper over the canonical `(WorldState, SimulationEngine)` pair with
+  `step()` / `run()` / `state` / `events` / `finished` / `terminated_by`.
+  New public `SimulationEngine.step()` advances exactly one discrete round.
+- **Typed agent contract.** `DecisionFn` / `OnEventFn` aliases document the
+  real callback signature `(entity_id, perception, valid_actions) ->
+  ActionInstance | None`; `ActionInstance`, `WorldState`, `SimulationEngine`,
+  and `SimEvent` are now exported from the package root.
+- `py.typed` marker — the package now ships its type annotations.
+- `examples/` — a complete runnable tic-tac-toe template plus
+  `examples/quickstart.py`.
 - **Continuous coupled-dynamics ("physics").** New `physics` module: a dt-aware
   system of coupled ODEs (`PhysicsModel`) integrated with 4th-order Runge–Kutta
   and sub-stepping. Variables may be free global scalars, read entity-property

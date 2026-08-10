@@ -368,6 +368,12 @@ def load_world(
         template.model_dump() if isinstance(template, WorldTemplate) else template
     )
     state = build_world_state(schema)
+    engine_kwargs: Dict[str, Any] = {}
+    # temporal.max_rounds is the template's round budget — honor it here
+    # so every load_world caller gets it, not just the SDK facade.
+    max_rounds = (schema.get("temporal") or {}).get("max_rounds")
+    if max_rounds is not None:
+        engine_kwargs["max_rounds"] = int(max_rounds)
     engine = SimulationEngine(
         state,
         seed=seed,
@@ -375,6 +381,7 @@ def load_world(
         on_event=on_event,
         termination_conditions=_build_termination_conditions(schema),
         continuous_time=build_continuous_model(schema),
+        **engine_kwargs,
     )
     return state, engine
 

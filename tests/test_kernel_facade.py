@@ -111,6 +111,22 @@ class TestStep:
         assert len(world.events) == n_events
         assert world.current_round == 3
 
+    def test_step_then_run_completes_remaining_budget(self):
+        world = Kernel(seed=5).load(_template(), decision_fn=_bid(20.0))
+        world.step()
+        assert world.current_round == 1
+        world.run()
+        assert world.finished
+        assert world.current_round == 3  # 1 stepped + 2 remaining, not 1 + 3
+        types = [e.event_type for e in world.events]
+        assert types.count("simulation_start") == 1
+        assert types.count("simulation_end") == 1
+        assert types.count("round_start") == 3
+        # run() after finish is a clean no-op
+        n = len(world.events)
+        world.run()
+        assert len(world.events) == n
+
     def test_step_matches_run_result(self):
         stepped = Kernel(seed=7).load(_template(), decision_fn=_bid(33.0))
         while not stepped.finished:

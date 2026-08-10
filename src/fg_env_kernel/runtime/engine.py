@@ -224,7 +224,10 @@ class SimulationEngine:
         self._running = False
         self._paused = False
         self._stopped = False
-        self._step_ended = False  # step() emitted simulation_end
+        # step() and run() share these so mixing them never double-emits
+        # the simulation_start / simulation_end bracket events.
+        self._start_emitted = False
+        self._end_emitted = False
         self._perception_builder = PerceptionBuilder()
         self._trend_analyzer = TrendAnalyzer(max_snapshots=5)
         self.on_round_start = on_round_start
@@ -296,25 +299,36 @@ class SimulationEngine:
                 "step() supports discrete (turn-based) mode only; "
                 "continuous-time simulations must use run()"
             )
-        if self._step_ended or self.finished:
+        if self._end_emitted or self.finished:
             return self.state
-        if not self._running:
-            self._running = True
-            agents = self.state.get_agent_entities()
-            self._emit_event(
-                "simulation_start",
-                narrative=f"Simulation begins. {len(agents)} agents active.",
-            )
+        self._running = True
+        self._emit_start()
         self.state.temporal.advance_round()
         self._run_round()
-        if self.finished and not self._paused:
-            self._step_ended = True
+        if (self.finished or not self._running) and not self._paused:
+            self._emit_end()
+        return self.state
+
+    def _emit_start(self) -> None:
+        """Emit simulation_start exactly once per engine lifetime."""
+        if self._start_emitted:
+            return
+        self._start_emitted = True
+        agents = self.state.get_agent_entities()
+        self._emit_event(
+            "simulation_start",
+            narrative=f"Simulation begins. {len(agents)} agents active.",
+        )
+
+    def _emit_end(self) -> None:
+        """Emit simulation_end exactly once and stop the loop."""
+        if not self._end_emitted:
+            self._end_emitted = True
             self._emit_event(
                 "simulation_end",
                 narrative=f"Simulation ended after {self.state.temporal.current_round} rounds.",
             )
-            self._running = False
-        return self.state
+        self._running = False
 
     def run(self) -> WorldState:
         """Run the full simulation. Returns final state.
@@ -336,14 +350,19 @@ class SimulationEngine:
         return self._run_discrete()
 
     def _run_discrete(self) -> WorldState:
-        """Run the simulation in discrete (turn-based) mode."""
-        agents = self.state.get_agent_entities()
-        self._emit_event(
-            "simulation_start",
-            narrative=f"Simulation begins. {len(agents)} agents active.",
-        )
+        """Run the simulation in discrete (turn-based) mode.
 
-        for round_num in range(self.max_rounds):
+        Resumable: honors rounds already played via step() (or a restored
+        snapshot) — it emits simulation_start only if step() hasn't, runs
+        only the REMAINING round budget, and no-ops if already ended.
+        """
+        if self._end_emitted:
+            self._running = False
+            return self.state
+        self._emit_start()
+
+        remaining = self.max_rounds - self.state.temporal.current_round
+        for _ in range(max(0, remaining)):
             if not self._running or self._paused:
                 break
             self.state.temporal.advance_round()
@@ -352,11 +371,7 @@ class SimulationEngine:
                 break
 
         if not self._paused:
-            self._emit_event(
-                "simulation_end",
-                narrative=f"Simulation ended after {self.state.temporal.current_round} rounds.",
-            )
-            self._running = False
+            self._emit_end()
         return self.state
 
     def _run_continuous(self) -> WorldState:
@@ -482,22 +497,9 @@ class SimulationEngine:
         if self._continuous_time is not None:
             self._running = True
             return self._run_continuous()
-        # Continue the loop from where we left off using the authoritative round counter
-        remaining = self.max_rounds - self.state.temporal.current_round
-        for _ in range(max(0, remaining)):
-            if not self._running or self._paused:
-                break
-            self.state.temporal.advance_round()
-            self._run_round()
-            if self._paused:
-                break
-        if not self._paused:
-            self._emit_event(
-                "simulation_end",
-                narrative=f"Simulation ended after {self.state.temporal.current_round} rounds.",
-            )
-            self._running = False
-        return self.state
+        # Continue from the authoritative round counter — _run_discrete is
+        # resume-aware (remaining budget only, bracket events emitted once).
+        return self._run_discrete()
 
     def is_paused(self) -> bool:
         """Check if the simulation is currently paused."""

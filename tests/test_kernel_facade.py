@@ -164,3 +164,96 @@ class TestExamples:
         world.run()
         assert world.finished
         assert world.terminated_by == "three_in_a_row"
+
+
+class TestRegistryIsolation:
+    """Kernel(registry=...) resolves against that registry only."""
+
+    @staticmethod
+    def _template_with_custom_effect():
+        t = _template()
+        t["actions"][0]["effects_on_success"] = [
+            {"operation": "double_offer", "target": "actor"}]
+        return t
+
+    def test_forked_registries_do_not_see_each_other(self):
+        from fg_env_kernel import registry
+
+        reg_a = registry.fork()
+        reg_b = registry.fork()
+
+        @reg_a.effect("only_in_a")
+        def _only_in_a(ctx, spec):
+            return None
+
+        assert reg_a.effects.has("only_in_a")
+        assert not reg_b.effects.has("only_in_a")
+        assert not registry.effects.has("only_in_a")
+
+    def test_kernel_with_custom_registry_resolves_its_effect(self):
+        from fg_env_kernel import registry
+
+        mine = registry.fork()
+
+        @mine.effect("double_offer")
+        def _double_offer(ctx, spec):
+            offer = ctx.actor.properties.get("offer", 0.0)
+            ctx.actor.properties["offer"] = (offer or 1.0) * 2
+            return None
+
+        world = Kernel(seed=1, registry=mine).load(
+            self._template_with_custom_effect(), decision_fn=_bid(1.0),
+            max_rounds=1)
+        world.run()
+        assert world.state.get_entity("b1").properties["offer"] == 2.0
+
+    def test_default_kernel_rejects_unknown_custom_effect(self):
+        # The effect only exists in a fork nobody passed in — the default
+        # kernel must not see it (loader raises on the unknown op).
+        from fg_env_kernel import registry
+
+        stray = registry.fork()
+
+        @stray.effect("double_offer", replace=True)
+        def _double_offer(ctx, spec):
+            return None
+
+        with pytest.raises(Exception, match="double_offer"):
+            Kernel().load(self._template_with_custom_effect())
+
+    def test_fork_sees_builtin_terminations(self):
+        from fg_env_kernel import registry
+
+        mine = registry.fork()
+        template = _template()
+        template["termination_conditions"] = [{
+            "name": "rich", "check_type": "expr",
+            "params": {"expr": "$max_of(Bidder, offer) >= 3"},
+        }]
+        world = Kernel(seed=1, registry=mine).load(
+            template, decision_fn=_bid(5.0))
+        world.run()
+        assert world.terminated_by == "rich"
+
+    def test_custom_termination_in_fork_only(self):
+        from fg_env_kernel import registry
+
+        mine = registry.fork()
+
+        @mine.termination("always_done")
+        def _always_done(state, params, rng):
+            return True
+
+        template = _template()
+        template["termination_conditions"] = [{
+            "name": "instant", "check_type": "always_done", "params": {}}]
+
+        world = Kernel(registry=mine).load(template, decision_fn=_bid(2.0))
+        world.run()
+        assert world.terminated_by == "instant"
+
+        # Default kernel doesn't know the check_type — never fires.
+        plain = Kernel().load(template, decision_fn=_bid(2.0))
+        plain.run()
+        assert plain.terminated_by is None
+        assert plain.current_round == 3

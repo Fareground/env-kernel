@@ -106,7 +106,7 @@ The engine is fully decoupled from the LLM — the same world runs with real age
 
 ### Going lower level
 
-The facade is a thin wrapper over `load_world(template, *, seed=0, decision_fn=None, on_event=None)`, which returns the raw `(WorldState, SimulationEngine)` pair — use it when you need direct engine or state access. Custom primitives register through the decorator surface (`@effect`, `@resolution`, `@phase`, `@termination_decorator`, `@module`) shown below.
+The facade is a thin wrapper over `load_world(template, *, seed=0, decision_fn=None, on_event=None, registry=None)`, which returns the raw `(WorldState, SimulationEngine)` pair — use it when you need direct engine or state access. Custom primitives register through the decorator surface (`@effect`, `@resolution`, `@phase`, `@termination_decorator`, `@module`) shown below.
 
 The full template shape is documented in [`docs/template_schema.md`](docs/template_schema.md); the machine-readable contract (including the live list of every registered effect operation, resolution archetype, termination check, and domain module) is [`docs/kernel_contract.json`](docs/kernel_contract.json).
 
@@ -126,15 +126,31 @@ A `physics` block on the world definition declares numeric variables and their r
 
 ### Extending the engine
 
-Register custom verbs, resolution archetypes, phases, and terminations with decorators — the engine looks everything up by string name through the registry:
+Register custom verbs, resolution archetypes, phases, and terminations with decorators — the engine looks everything up by string name through the registry. The module-level decorators register process-wide:
 
 ```python
 from fg_env_kernel import effect, EffectContext
 
 @effect("grant_gold")
-def grant_gold(ctx: EffectContext, amount: int) -> None:
-    ctx.set(ctx.actor, "gold", ctx.get(ctx.actor, "gold") + amount)
+def grant_gold(ctx: EffectContext, spec: dict) -> None:
+    gold = ctx.actor.properties.get("gold", 0)
+    ctx.actor.properties["gold"] = gold + spec.get("value", 1)
 ```
+
+For per-kernel isolation, fork the registry and register on the fork. A fork sees every built-in primitive (nothing is copied — unknown names fall back to the parent), but its own registrations are invisible to the global registry and to other forks:
+
+```python
+from fg_env_kernel import Kernel, registry
+
+mine = registry.fork()
+
+@mine.effect("grant_gold")
+def grant_gold(ctx, spec): ...
+
+kernel = Kernel(seed=42, registry=mine)   # worlds resolve against `mine` only
+```
+
+Every namespace has an instance decorator (`mine.effect`, `mine.precondition`, `mine.resolution`, `mine.phase`, `mine.termination`, `mine.module`, `mine.target_selector`). Validation/reporting surfaces (`lint_template`, `export_kernel_contract`) read the global registry.
 
 ## Concepts
 

@@ -42,7 +42,8 @@ import logging
 import random as _random
 from typing import Any, Callable, Dict, List, Optional
 
-from .registry import registry, termination as _termination_decorator
+from .registry import KernelRegistry, registry as _global_registry
+from .registry import termination as _termination_decorator
 from .predicates import evaluate as evaluate_predicate
 
 logger = logging.getLogger(__name__)
@@ -66,14 +67,24 @@ def register_winner_resolver(
     _WINNER_RESOLVERS[name.strip().lower()] = fn
 
 
-def evaluate(state: Any, condition: Any, rng: Optional[_random.Random] = None) -> bool:
+def evaluate(
+    state: Any,
+    condition: Any,
+    rng: Optional[_random.Random] = None,
+    *,
+    registry: Optional["KernelRegistry"] = None,
+) -> bool:
     """Evaluate a single termination condition against current state.
 
     Returns ``True`` if the condition is met. Returns ``False`` when
     the check_type is unknown — callers may fall back to legacy in-
     engine handling for built-ins still living there during migration.
+
+    ``registry`` scopes custom check_type lookup; ``None`` = the
+    process-global registry.
     """
     rng = rng or _random.Random(0)
+    kreg = registry if registry is not None else _global_registry
     check_type = (getattr(condition, "check_type", None) or "").strip().lower()
     params = getattr(condition, "params", None) or {}
 
@@ -95,13 +106,15 @@ def evaluate(state: Any, condition: Any, rng: Optional[_random.Random] = None) -
     # Compound conditions recurse through this same evaluator
     if check_type == "compound_and":
         subs = getattr(condition, "sub_conditions", None) or []
-        return bool(subs) and all(evaluate(state, sub, rng) for sub in subs)
+        return bool(subs) and all(
+            evaluate(state, sub, rng, registry=registry) for sub in subs)
     if check_type == "compound_or":
         subs = getattr(condition, "sub_conditions", None) or []
-        return bool(subs) and any(evaluate(state, sub, rng) for sub in subs)
+        return bool(subs) and any(
+            evaluate(state, sub, rng, registry=registry) for sub in subs)
 
     # Registry lookup
-    fn = registry.terminations.try_get(check_type)
+    fn = kreg.terminations.try_get(check_type)
     if fn is None:
         return False
     try:
@@ -115,10 +128,12 @@ def check_all(
     state: Any,
     conditions: List[Any],
     rng: Optional[_random.Random] = None,
+    *,
+    registry: Optional["KernelRegistry"] = None,
 ) -> Optional[Any]:
     """Walk a list of conditions; return the first one that fires, or None."""
     for tc in conditions:
-        if evaluate(state, tc, rng):
+        if evaluate(state, tc, rng, registry=registry):
             return tc
     return None
 

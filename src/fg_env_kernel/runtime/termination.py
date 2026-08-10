@@ -42,12 +42,11 @@ def _evaluate_condition(engine, tc: TerminationCondition) -> bool:
     # faction_win, vote_threshold, expr, compound_and/or, plus any
     # custom @termination(...) registration.
     from .. import termination as _term
-    from ..registry import registry as _kreg
     check_type = (tc.check_type or "").lower()
     if (check_type in ("expr", "compound_and", "compound_or")
-            or _kreg.terminations.has(check_type)
+            or engine.registry.terminations.has(check_type)
             or ((tc.params or {}).get("expr") if tc.params else None)):
-        return _term.evaluate(engine.state, tc, engine._rng)
+        return _term.evaluate(engine.state, tc, engine._rng, registry=engine.registry)
 
     # Legacy fall-through for check_types still living in-engine.
     if tc.check_type == "all_dead":

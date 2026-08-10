@@ -144,7 +144,7 @@ def _apply_effects_body(
             )
             branch_raw = spec.get("then") if cond_truthy else spec.get("else")
             if branch_raw:
-                branch_effects = _coerce_effects(branch_raw)
+                branch_effects = _coerce_effects(branch_raw, engine.registry)
                 sub_changes = engine._apply_effects(
                     branch_effects, actor, target, params, result,
                 )
@@ -285,9 +285,8 @@ def _apply_effects_body(
         # switch. Built-in ops keep their original code path so
         # this is a pure additive change.
         if isinstance(effect.operation, str):
-            from ..registry import registry as _kreg
             from ..effect_context import EffectContext as _EffCtx
-            handler = _kreg.effects.try_get(effect.operation)
+            handler = engine.registry.effects.try_get(effect.operation)
             if handler is not None:
                 ctx = _EffCtx(
                     state=engine.state,
@@ -519,7 +518,7 @@ def _apply_effects_body(
             })
             # Apply the card's effects through the same machinery.
             card_effects_raw = card.get("effect") or card.get("effects") or []
-            card_effects = _coerce_effects(card_effects_raw)
+            card_effects = _coerce_effects(card_effects_raw, engine.registry)
             if card_effects:
                 nested = engine._apply_effects(card_effects, actor, target, params, result)
                 changes.extend(nested)
@@ -566,7 +565,7 @@ def _apply_effects_body(
                     # Fire the slot's reward effects, with $claimer
                     # available as the ent.
                     if reward_effects:
-                        reward = _coerce_effects(reward_effects)
+                        reward = _coerce_effects(reward_effects, engine.registry)
                         nested = engine._apply_effects(reward, actor, target, params, result)
                         changes.extend(nested)
             else:  # RELEASE_SLOT
@@ -638,7 +637,7 @@ def _apply_effects_body(
                     )
                     # Recursively apply the card's own effect, if any.
                     card_effects_raw = played.get("effect") or played.get("effects") or []
-                    card_effects = _coerce_effects(card_effects_raw)
+                    card_effects = _coerce_effects(card_effects_raw, engine.registry)
                     if card_effects:
                         nested = engine._apply_effects(card_effects, actor, target, params, result)
                         changes.extend(nested)

@@ -111,12 +111,25 @@ class Kernel:
 
     Args:
         seed:     default RNG seed for worlds loaded by this kernel.
-        registry: primitive registry to resolve effects / terminations /
-                  modules against. Defaults to the process-global
-                  registry; a custom ``KernelRegistry`` is accepted now
-                  so callers can prepare for per-kernel isolation, but
-                  the loader currently resolves against the global
-                  registry — isolated resolution is a planned follow-up.
+        registry: primitive registry that worlds loaded by this kernel
+                  resolve custom effect ops and termination checks
+                  against. Defaults to the process-global registry.
+                  Build an isolated one with ``registry.fork()`` — the
+                  fork sees all built-ins but keeps its own
+                  registrations private to this kernel::
+
+                      from fg_env_kernel import Kernel, registry
+
+                      mine = registry.fork()
+
+                      @mine.effect("my_op")
+                      def _my_op(ctx, spec): ...
+
+                      kernel = Kernel(seed=42, registry=mine)
+
+                  Validation/reporting surfaces (``lint_template``,
+                  ``export_kernel_contract``) still read the global
+                  registry.
     """
 
     def __init__(self, seed: int = 0, registry: Optional[KernelRegistry] = None):
@@ -145,6 +158,7 @@ class Kernel:
             seed=self.seed if seed is None else seed,
             decision_fn=decision_fn,
             on_event=on_event,
+            registry=self.registry,
         )
         if max_rounds is not None:
             engine.max_rounds = int(max_rounds)

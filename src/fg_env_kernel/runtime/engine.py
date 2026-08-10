@@ -12,7 +12,10 @@ import logging
 import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from ..registry import KernelRegistry
 
 from ..state import WorldState
 from ..action import ActionInstance, ActionDefinition, Effect, EffectOperation
@@ -65,7 +68,7 @@ def _action_suppresses_chat(state: Any, action_name: str) -> bool:
     return False
 
 
-def _coerce_effects(raw: Any) -> List["Effect"]:
+def _coerce_effects(raw: Any, registry: Optional["KernelRegistry"] = None) -> List["Effect"]:
     """Turn schema-style effect dicts into Effect dataclass instances.
 
     Used by features that store effects in JSON (deck cards, phase-
@@ -98,8 +101,9 @@ def _coerce_effects(raw: Any) -> List["Effect"]:
                 # Not a built-in op — check the plugin registry. If
                 # registered, keep the raw string as the operation;
                 # _apply_effects will route it via registry dispatch.
-                from ..registry import registry as _kreg
-                if _kreg.effects.has(str(op_raw)):
+                if registry is None:
+                    from ..registry import registry
+                if registry.effects.has(str(op_raw)):
                     op = str(op_raw).lower()
                 else:
                     continue
@@ -204,8 +208,13 @@ class SimulationEngine:
         continuous_time: Optional[Any] = None,
         parallel_decisions: int = 0,
         emit_state_snapshots: bool = False,
+        registry: Optional["KernelRegistry"] = None,
     ):
         self.state = state
+        # Primitive registry this engine resolves custom effect ops and
+        # termination checks against. None = process-global registry.
+        from ..registry import registry as _global_registry
+        self.registry: "KernelRegistry" = registry if registry is not None else _global_registry
         # Tier 5a — Triggered effects loaded from schema. Engine
         # evaluates these on every _emit_event call.
         from ..triggers import TriggerEngine

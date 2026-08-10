@@ -28,6 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   real callback signature `(entity_id, perception, valid_actions) ->
   ActionInstance | None`; `ActionInstance`, `WorldState`, `SimulationEngine`,
   and `SimEvent` are now exported from the package root.
+- **Per-kernel registry isolation.** `registry.fork()` returns a child
+  registry that sees all built-in primitives (fallback to parent, nothing
+  copied) while keeping its own registrations private. Every namespace has a
+  registry-bound decorator (`my_registry.effect(...)`, `.termination(...)`,
+  ...), and `Kernel(registry=my_registry)` / `load_world(registry=...)` /
+  `build_world_state(registry=...)` / `termination.evaluate(registry=...)`
+  resolve custom effect ops and termination checks against that registry only.
+  Validation/reporting surfaces (`lint_template`, `export_kernel_contract`)
+  still read the global registry.
 - `py.typed` marker — the package now ships its type annotations.
 - `examples/` — a complete runnable tic-tac-toe template plus
   `examples/quickstart.py`.

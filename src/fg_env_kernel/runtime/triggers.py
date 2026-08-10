@@ -168,7 +168,7 @@ def _fire_trigger(engine,
     can reference `$event.field` (mapped to params here)."""
     actor = engine.state.get_entity(actor_id) if actor_id else None
     target = engine.state.get_entity(target_id) if target_id else None
-    effects = _coerce_effects(spec.effect)
+    effects = _coerce_effects(spec.effect, engine.registry)
     if not effects:
         return
     # We pass `event_data` through the `params` channel so $params.X

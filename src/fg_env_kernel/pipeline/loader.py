@@ -50,6 +50,7 @@ from ..engine import SimulationEngine, TerminationCondition
 from ..entity import Entity, EntityType
 from ..factions import Faction
 from ..resource import ResourcePool, ResourceType
+from ..registry import KernelRegistry, registry as _global_registry
 from ..relations import RelationType
 from ..spatial import Continuous2DSpace, GraphSpace, GridSpace, NoSpace
 from ..state import WorldState
@@ -292,11 +293,16 @@ _EFFECT_OP_MAP: Dict[str, EffectOperation] = {op.value: op for op in EffectOpera
 # ===========================================================================
 
 
-def build_world_state(schema: Dict[str, Any]) -> WorldState:
+def build_world_state(
+    schema: Dict[str, Any],
+    *,
+    registry: Optional[KernelRegistry] = None,
+) -> WorldState:
     """Build a fully-wired WorldState from a JSON schema dict.
 
     This is the canonical builder — the single source of truth for
-    turning declarative JSON into a runtime state graph."""
+    turning declarative JSON into a runtime state graph. ``registry``
+    scopes custom effect-op validation; ``None`` = process-global."""
     state = WorldState()
 
     _apply_tables_and_runtime(state, schema)
@@ -327,7 +333,7 @@ def build_world_state(schema: Dict[str, Any]) -> WorldState:
     _apply_resource_types(state, schema.get("resource_types") or [])
     _apply_relation_types(state, schema.get("relation_types") or [])
     _apply_visibility_rules(state, schema.get("visibility_rules") or [])
-    _apply_actions(state, schema.get("actions") or [])
+    _apply_actions(state, schema.get("actions") or [], registry=registry)
     _apply_entities(state, schema.get("entities") or [])
     _apply_resource_holdings(state, schema)
     _apply_initial_relations(state, schema.get("initial_relations") or [])
@@ -359,15 +365,20 @@ def load_world(
     seed: int = 0,
     decision_fn: Any = None,
     on_event: Any = None,
+    registry: Optional["KernelRegistry"] = None,
 ) -> Tuple[WorldState, SimulationEngine]:
     """Build state + engine from a template dict.
 
     Accepts either a raw dict (as emitted by an env-builder agent) or
-    a pre-validated ``WorldTemplate`` instance."""
+    a pre-validated ``WorldTemplate`` instance.
+
+    ``registry`` scopes custom-primitive resolution (effect ops,
+    termination checks) to the given ``KernelRegistry``; ``None`` uses
+    the process-global registry, preserving existing behavior."""
     schema: Dict[str, Any] = (
         template.model_dump() if isinstance(template, WorldTemplate) else template
     )
-    state = build_world_state(schema)
+    state = build_world_state(schema, registry=registry)
     engine_kwargs: Dict[str, Any] = {}
     # temporal.max_rounds is the template's round budget — honor it here
     # so every load_world caller gets it, not just the SDK facade.
@@ -381,6 +392,7 @@ def load_world(
         on_event=on_event,
         termination_conditions=_build_termination_conditions(schema),
         continuous_time=build_continuous_model(schema),
+        registry=registry,
         **engine_kwargs,
     )
     return state, engine
@@ -394,12 +406,14 @@ def load_world_parts(
     seed: int = 0,
     decision_fn: Any = None,
     on_event: Any = None,
+    registry: Optional[KernelRegistry] = None,
 ) -> Tuple[WorldState, SimulationEngine]:
     """Three-document form: schema + rules + viz as separate dicts."""
     merged = {**schema, **rules}
     if viz:
         merged["viz"] = viz
-    return load_world(merged, seed=seed, decision_fn=decision_fn, on_event=on_event)
+    return load_world(merged, seed=seed, decision_fn=decision_fn, on_event=on_event,
+                      registry=registry)
 
 
 # ===========================================================================
@@ -587,7 +601,12 @@ def _apply_visibility_rules(state: WorldState, specs: List[Dict[str, Any]]) -> N
         ))
 
 
-def _apply_actions(state: WorldState, specs: List[Dict[str, Any]]) -> None:
+def _apply_actions(
+    state: WorldState,
+    specs: List[Dict[str, Any]],
+    *,
+    registry: Optional[KernelRegistry] = None,
+) -> None:
     for ad in specs:
         state.register_action(ActionDefinition(
             name=ad["name"],
@@ -598,9 +617,9 @@ def _apply_actions(state: WorldState, specs: List[Dict[str, Any]]) -> None:
             preconditions=_parse_preconditions(ad.get("preconditions", [])),
             resolution_archetype=ad.get("resolution_archetype", "deterministic"),
             resolution_params=ad.get("resolution_params", {}),
-            effects_on_success=_parse_effects(ad.get("effects_on_success", [])),
-            effects_on_failure=_parse_effects(ad.get("effects_on_failure", [])),
-            effects_on_partial=_parse_effects(ad.get("effects_on_partial", [])),
+            effects_on_success=_parse_effects(ad.get("effects_on_success", []), registry=registry),
+            effects_on_failure=_parse_effects(ad.get("effects_on_failure", []), registry=registry),
+            effects_on_partial=_parse_effects(ad.get("effects_on_partial", []), registry=registry),
             requires_action=ad.get("requires_action"),
             requires_action_success=ad.get("requires_action_success", True),
             cooldown_rounds=ad.get("cooldown_rounds", 0),
@@ -642,16 +661,20 @@ def _parse_preconditions(data: List[Dict[str, Any]]) -> List[Precondition]:
     return out
 
 
-def _parse_effects(data: List[Dict[str, Any]]) -> List[Effect]:
+def _parse_effects(
+    data: List[Dict[str, Any]],
+    *,
+    registry: Optional[KernelRegistry] = None,
+) -> List[Effect]:
     out: List[Effect] = []
+    kreg = registry if registry is not None else _global_registry
     for eff in data:
         op_str = eff.get("operation", "set")
         operation: Any = _EFFECT_OP_MAP.get(op_str)
         if operation is None:
             # Check kernel registry (P3 custom ops)
             try:
-                from ..registry import registry as _kreg
-                if _kreg.effects.has(op_str):
+                if kreg.effects.has(op_str):
                     operation = op_str.lower()
                 else:
                     raise ValueError(

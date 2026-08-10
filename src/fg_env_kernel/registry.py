@@ -168,8 +168,54 @@ class KernelRegistry:
         """Yield a child registry that falls back to ``self`` for unknown
         keys. Useful in tests to register temp handlers without polluting
         global state."""
-        child = KernelRegistry(_parent=self)
-        yield child
+        yield self.fork()
+
+    def fork(self) -> "KernelRegistry":
+        """Return an isolated child registry.
+
+        The child resolves unknown names through ``self`` (so built-in
+        primitives stay visible — nothing is copied), while its own
+        registrations stay local: they are invisible to the parent and
+        to sibling forks. This is the isolation unit ``Kernel``
+        consumes: ``Kernel(registry=registry.fork())``.
+        """
+        return KernelRegistry(_parent=self)
+
+    # -- registry-bound decorators ------------------------------------------
+    # Instance twins of the module-level @effect / @termination / ...
+    # decorators: they register into THIS registry instead of the global
+    # one, e.g. ``@my_registry.effect("my_op")``.
+
+    def _decorator(self, namespace: _Namespace):
+        def deco(name: str, *, aliases: Optional[List[str]] = None, replace: bool = False):
+            def _wrap(obj: Any) -> Any:
+                with _REGISTRATION_LOCK:
+                    namespace.register(name, obj, aliases=aliases, replace=replace)
+                return obj
+            return _wrap
+        return deco
+
+    def effect(self, name: str, *, aliases: Optional[List[str]] = None, replace: bool = False):
+        """Decorator: register an effect handler in this registry."""
+        return self._decorator(self.effects)(name, aliases=aliases, replace=replace)
+
+    def precondition(self, name: str, *, aliases: Optional[List[str]] = None, replace: bool = False):
+        return self._decorator(self.preconditions)(name, aliases=aliases, replace=replace)
+
+    def resolution(self, name: str, *, aliases: Optional[List[str]] = None, replace: bool = False):
+        return self._decorator(self.resolutions)(name, aliases=aliases, replace=replace)
+
+    def phase(self, name: str, *, aliases: Optional[List[str]] = None, replace: bool = False):
+        return self._decorator(self.phases)(name, aliases=aliases, replace=replace)
+
+    def termination(self, name: str, *, aliases: Optional[List[str]] = None, replace: bool = False):
+        return self._decorator(self.terminations)(name, aliases=aliases, replace=replace)
+
+    def module(self, name: str, *, aliases: Optional[List[str]] = None, replace: bool = False):
+        return self._decorator(self.modules)(name, aliases=aliases, replace=replace)
+
+    def target_selector(self, name: str, *, aliases: Optional[List[str]] = None, replace: bool = False):
+        return self._decorator(self.target_selectors)(name, aliases=aliases, replace=replace)
 
 
 # ---------------------------------------------------------------------------
@@ -189,65 +235,39 @@ _REGISTRATION_LOCK = threading.Lock()
 # ---------------------------------------------------------------------------
 
 def effect(name: str, *, aliases: Optional[List[str]] = None, replace: bool = False):
-    """Decorator: register an effect handler under ``name``.
+    """Decorator: register an effect handler under ``name`` in the
+    GLOBAL registry. For per-kernel isolation use the instance twin:
+    ``@my_registry.effect(name)``.
 
     The handler signature is::
 
         def handler(ctx: EffectContext, spec: dict) -> Optional[dict]
     """
-    def _wrap(fn: Callable[..., Any]) -> Callable[..., Any]:
-        with _REGISTRATION_LOCK:
-            registry.effects.register(name, fn, aliases=aliases, replace=replace)
-        return fn
-    return _wrap
+    return registry.effect(name, aliases=aliases, replace=replace)
 
 
 def precondition(name: str, *, aliases: Optional[List[str]] = None, replace: bool = False):
-    def _wrap(fn: Callable[..., bool]) -> Callable[..., bool]:
-        with _REGISTRATION_LOCK:
-            registry.preconditions.register(name, fn, aliases=aliases, replace=replace)
-        return fn
-    return _wrap
+    return registry.precondition(name, aliases=aliases, replace=replace)
 
 
 def resolution(name: str, *, aliases: Optional[List[str]] = None, replace: bool = False):
-    def _wrap(cls_or_instance: Any) -> Any:
-        with _REGISTRATION_LOCK:
-            registry.resolutions.register(name, cls_or_instance, aliases=aliases, replace=replace)
-        return cls_or_instance
-    return _wrap
+    return registry.resolution(name, aliases=aliases, replace=replace)
 
 
 def phase(name: str, *, aliases: Optional[List[str]] = None, replace: bool = False):
-    def _wrap(cls_or_instance: Any) -> Any:
-        with _REGISTRATION_LOCK:
-            registry.phases.register(name, cls_or_instance, aliases=aliases, replace=replace)
-        return cls_or_instance
-    return _wrap
+    return registry.phase(name, aliases=aliases, replace=replace)
 
 
 def termination(name: str, *, aliases: Optional[List[str]] = None, replace: bool = False):
-    def _wrap(fn: Callable[..., Any]) -> Callable[..., Any]:
-        with _REGISTRATION_LOCK:
-            registry.terminations.register(name, fn, aliases=aliases, replace=replace)
-        return fn
-    return _wrap
+    return registry.termination(name, aliases=aliases, replace=replace)
 
 
 def module(name: str, *, aliases: Optional[List[str]] = None, replace: bool = False):
-    def _wrap(factory: Callable[..., Any]) -> Callable[..., Any]:
-        with _REGISTRATION_LOCK:
-            registry.modules.register(name, factory, aliases=aliases, replace=replace)
-        return factory
-    return _wrap
+    return registry.module(name, aliases=aliases, replace=replace)
 
 
 def target_selector(name: str, *, aliases: Optional[List[str]] = None, replace: bool = False):
-    def _wrap(fn: Callable[..., Any]) -> Callable[..., Any]:
-        with _REGISTRATION_LOCK:
-            registry.target_selectors.register(name, fn, aliases=aliases, replace=replace)
-        return fn
-    return _wrap
+    return registry.target_selector(name, aliases=aliases, replace=replace)
 
 
 __all__ = [

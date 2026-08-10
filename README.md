@@ -40,18 +40,75 @@ The package is not on PyPI — install from GitHub:
 pip install "fg-env-kernel @ git+https://github.com/Fareground/env-kernel.git"
 ```
 
-## Usage
+Importing the package never scans the filesystem. Drop-in primitive discovery (`kernel_primitives/*.py`) is opt-in: call `fg_env_kernel.discover()` explicitly, or set the `KERNEL_PRIMITIVES_DIR` environment variable — an explicitly configured directory is honored at import time.
 
-Build state and an engine from a declarative world definition, then step it:
+## Quickstart
+
+A world is a plain dict; an agent is a plain function. This is a complete, runnable program:
 
 ```python
-from fg_env_kernel import load_world
+from fg_env_kernel import ActionInstance, Kernel
 
-state, engine = load_world(my_world_definition, seed=42, decision_fn=my_agent_brain)
-engine.run()
+template = {
+    "name": "Race to 10",
+    "description": "Two runners sprint; first to distance 10 wins.",
+    "entity_types": [
+        {"name": "runner", "role": "agent", "properties": [
+            {"name": "distance", "type": "float", "default": 0}
+        ]}
+    ],
+    "entities": [
+        {"id": "alice", "entity_type": "runner", "name": "Alice"},
+        {"id": "bob", "entity_type": "runner", "name": "Bob"},
+    ],
+    "actions": [
+        {"name": "sprint", "description": "Run forward.", "actor_type": "runner",
+         "effects_on_success": [
+             {"operation": "add", "target": "actor", "field": "distance",
+              "value": "$random(1, 3)"}
+         ]}
+    ],
+    "termination_conditions": [
+        {"name": "finish_line", "check_type": "expr",
+         "params": {"expr": "$state.entities.alice.distance >= 10 || "
+                            "$state.entities.bob.distance >= 10"}}
+    ],
+    "temporal": {"max_rounds": 20},
+}
+
+def decision_fn(entity_id, perception, valid_actions):
+    """Called once per agent turn. Swap in an LLM call here."""
+    if "sprint" not in valid_actions:
+        return None
+    return ActionInstance(action_name="sprint", actor_id=entity_id)
+
+world = Kernel(seed=42).load(template, decision_fn=decision_fn)
+world.run()                       # or: while not world.finished: world.step()
+
+print(world.terminated_by)        # "finish_line"
+print(world.current_round)        # 5
+print(world.events[-1].narrative) # "Simulation ended after 5 rounds."
 ```
 
-`load_world(template, *, seed=0, decision_fn=None, on_event=None)` returns a `(WorldState, SimulationEngine)` tuple. The engine is fully decoupled from the LLM — the same world runs with real agents, cheap heuristics, or a deterministic test stub through the `decision_fn` callback.
+Same seed, same template, same `decision_fn` → same run, every time. More in [`examples/`](examples/) — including tic-tac-toe built from a domain module.
+
+## The agent contract
+
+`decision_fn(entity_id, perception, valid_actions) -> ActionInstance | None` is the only interface between your agent (LLM or otherwise) and the kernel:
+
+- **`entity_id`** — id of the agent whose turn it is.
+- **`perception`** — a plain dict of what this agent can see, visibility-filtered. Always present: `self` (own id/name/properties), `visible_entities`, `visible_relations`, `visible_resources`, `round`, `phase`, `location`, `faction`. Present when the world provides them: `world_brief` (the template's name/description/rules markdown), `incoming_messages`, `your_recent_actions`, `domain_data` (board layout, hand contents, market state, ...), and more (roles, polls, time context, trade history).
+- **`valid_actions`** — names of the actions whose preconditions currently pass. Return an `ActionInstance` whose `action_name` is one of these (with `actor_id=entity_id` and any `parameters` the action declares), or `None` to skip the turn.
+
+The engine is fully decoupled from the LLM — the same world runs with real agents, cheap heuristics, or a deterministic test stub.
+
+`Kernel(seed=..., registry=...)` holds run configuration; `Kernel.load(template, decision_fn=..., on_event=..., seed=..., max_rounds=...)` returns a `World` with `run()`, `step()`, `finished`, `terminated_by`, `current_round`, `events`, `state`, and `seed`. An `on_event` callback streams each event as it is emitted.
+
+### Going lower level
+
+The facade is a thin wrapper over `load_world(template, *, seed=0, decision_fn=None, on_event=None)`, which returns the raw `(WorldState, SimulationEngine)` pair — use it when you need direct engine or state access. Custom primitives register through the decorator surface (`@effect`, `@resolution`, `@phase`, `@termination_decorator`, `@module`) shown below.
+
+The full template shape is documented in [`docs/template_schema.md`](docs/template_schema.md); the machine-readable contract (including the live list of every registered effect operation, resolution archetype, termination check, and domain module) is [`docs/kernel_contract.json`](docs/kernel_contract.json).
 
 ### Continuous time and physics
 

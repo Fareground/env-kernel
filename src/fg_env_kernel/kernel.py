@@ -31,9 +31,14 @@ from .state import WorldState
 #
 #   entity_id      — id of the agent whose turn it is.
 #   perception     — dict of what the agent can see (visibility-filtered).
-#                    Keys include "self" (own properties/resources),
-#                    "visible_entities", "recent_events", "messages",
-#                    "location", and any module-contributed sections.
+#                    Always present: "self" (own id/name/properties),
+#                    "visible_entities", "visible_relations",
+#                    "visible_resources", "round", "phase", "location",
+#                    "faction". Present when the world provides them:
+#                    "world_brief" (name/description/rules markdown),
+#                    "incoming_messages", "your_recent_actions",
+#                    "domain_data" (module-contributed sections), and
+#                    others (roles, polls, time_context, trade_history).
 #   valid_actions  — action names whose preconditions currently pass.
 #
 # Return an ``ActionInstance`` (``action_name`` must be one of

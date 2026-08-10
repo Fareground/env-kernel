@@ -224,6 +224,7 @@ class SimulationEngine:
         self._running = False
         self._paused = False
         self._stopped = False
+        self._step_ended = False  # step() emitted simulation_end
         self._perception_builder = PerceptionBuilder()
         self._trend_analyzer = TrendAnalyzer(max_snapshots=5)
         self.on_round_start = on_round_start
@@ -270,6 +271,50 @@ class SimulationEngine:
                 reseed = getattr(mod, "reseed", None)
                 if callable(reseed):
                     reseed(self._rng)
+
+    @property
+    def finished(self) -> bool:
+        """True once the sim has ended — a termination condition fired,
+        ``stop()`` was called, or the round budget ran out."""
+        return (
+            self.terminated_by is not None
+            or self._stopped
+            or self.state.temporal.current_round >= self.max_rounds
+        )
+
+    def step(self) -> WorldState:
+        """Advance the simulation by exactly one discrete round.
+
+        Emits ``simulation_start`` on the first call and
+        ``simulation_end`` after the final round (termination condition,
+        ``stop()``, or the round budget). Calling again after the end is
+        a no-op. Continuous-time sims are event-driven and have no round
+        granularity — use ``run()`` for those.
+        """
+        if self._continuous_time is not None:
+            raise RuntimeError(
+                "step() supports discrete (turn-based) mode only; "
+                "continuous-time simulations must use run()"
+            )
+        if self._step_ended or self.finished:
+            return self.state
+        if not self._running:
+            self._running = True
+            agents = self.state.get_agent_entities()
+            self._emit_event(
+                "simulation_start",
+                narrative=f"Simulation begins. {len(agents)} agents active.",
+            )
+        self.state.temporal.advance_round()
+        self._run_round()
+        if self.finished and not self._paused:
+            self._step_ended = True
+            self._emit_event(
+                "simulation_end",
+                narrative=f"Simulation ended after {self.state.temporal.current_round} rounds.",
+            )
+            self._running = False
+        return self.state
 
     def run(self) -> WorldState:
         """Run the full simulation. Returns final state.

@@ -1,10 +1,18 @@
 """Fareground env kernel — the game-agnostic simulation engine.
 
-Public surface for env-builders and integrators:
+Quickstart (see ``examples/quickstart.py``):
+
+    from fg_env_kernel import Kernel
+
+    kernel = Kernel(seed=42)
+    world = kernel.load(template_dict, decision_fn=my_agent)
+    world.run()
+
+Extension surface for env-builders:
 
     from fg_env_kernel import (
         registry,
-        effect, precondition, resolution, phase, termination, module,
+        effect, precondition, resolution, phase, termination_decorator, module,
         EffectContext,
     )
 
@@ -33,15 +41,20 @@ from .effect_context import EffectContext
 # at kernel startup. Side-effect-only import.
 from . import composition  # noqa: F401
 
-# Auto-discover any kernel_primitives/*.py files (repo + env-var dir).
-# This lets library authors and downstream apps drop new primitives
-# into a known location without editing kernel imports.
-from .primitives_loader import discover as _discover_primitives, list_loaded_primitives
-try:
-    _discover_primitives()
-except Exception:
-    import logging
-    logging.getLogger(__name__).exception("kernel_primitives auto-discovery failed")
+# Primitive discovery (kernel_primitives/*.py drop-in directories) is
+# opt-in: call ``fg_env_kernel.discover()`` explicitly, or set
+# ``KERNEL_PRIMITIVES_DIR`` — an explicitly configured directory is a
+# clear request for discovery, so we honor it at import time. Importing
+# the package no longer scans the filesystem or imports arbitrary .py
+# files by default.
+from .primitives_loader import discover, list_loaded_primitives
+import os as _os
+if _os.environ.get("KERNEL_PRIMITIVES_DIR"):
+    try:
+        discover()
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("kernel_primitives discovery failed")
 # Pipeline — env-builder API surface (loader, compile, lint, smoke, contract)
 from .pipeline import (
     WorldTemplate,
@@ -91,6 +104,12 @@ from .observability import (
 )
 from .temporal import TemporalModel, TimeMode, Phase
 from .continuous_time import ContinuousTemporalModel, EventQueue, ScheduledEvent
+# SDK facade + typed agent contract
+from .action import ActionInstance
+from .event import SimEvent
+from .state import WorldState
+from .runtime.engine import SimulationEngine
+from .kernel import DecisionFn, Kernel, OnEventFn, World
 from .physics import (
     PhysicsModel,
     PhysicsVariable,
@@ -143,6 +162,7 @@ __all__ = [
     "engine_metrics_enabled",
     "get_logger",
     # Primitives loader
+    "discover",
     "list_loaded_primitives",
     "KernelRegistry",
     "registry",
@@ -150,10 +170,18 @@ __all__ = [
     "precondition",
     "resolution",
     "phase",
-    "termination",
     "module",
     "target_selector",
     "EffectContext",
+    # SDK facade + agent contract
+    "Kernel",
+    "World",
+    "DecisionFn",
+    "OnEventFn",
+    "ActionInstance",
+    "WorldState",
+    "SimulationEngine",
+    "SimEvent",
     # Temporal modes
     "TemporalModel",
     "TimeMode",

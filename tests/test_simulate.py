@@ -83,6 +83,34 @@ class TestDeterminism:
         assert simulate(make_template(), seed=1).finished
         assert simulate(make_template(), seed=2).finished
 
+    def test_same_seed_identical_event_log_simultaneous_phase(self):
+        # Simultaneous phases collect decisions from thread-pool workers;
+        # per-entity RNG derivation keeps the run seed-deterministic anyway.
+        template = make_template()
+        template["temporal"]["phases"] = [
+            {"name": "action", "resolution_mode": "simultaneous"}
+        ]
+        a = simulate(template, seed=42)
+        b = simulate(make_template() | {"temporal": template["temporal"]}, seed=42)
+        assert [(e.event_type, e.narrative) for e in a.events] == \
+               [(e.event_type, e.narrative) for e in b.events]
+        assert a.terminated_by == b.terminated_by
+
+    def test_per_entity_streams_independent_of_scheduling(self):
+        # The same entity gets the same picks no matter how its turns
+        # interleave with other entities' turns.
+        actions = ["a", "b", "c", "d"]
+        p1 = random_policy(seed=9)
+        serial = [p1("alice", {}, actions).action_name for _ in range(10)]
+
+        p2 = random_policy(seed=9)
+        interleaved = []
+        for _ in range(10):
+            p2("bob", {}, actions)      # bob's turns interleaved
+            p2("carol", {}, actions)    # a third entity joins too
+            interleaved.append(p2("alice", {}, actions).action_name)
+        assert serial == interleaved
+
     def test_default_policy_never_touches_global_random(self):
         import random
         random.seed(123)

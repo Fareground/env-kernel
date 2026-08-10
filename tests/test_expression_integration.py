@@ -123,7 +123,7 @@ def test_termination_via_expr(world):
         params={"expr": "$actor.gold + $target.gold > 240"},  # context-free won't work
     )
     # Build the engine with this condition
-    engine = SimulationEngine(state, termination_conditions=[tc])
+    SimulationEngine(state, termination_conditions=[tc])
 
     # Predicate without actor/target binding from the engine won't have
     # those entities in scope, so the check should fail-closed.

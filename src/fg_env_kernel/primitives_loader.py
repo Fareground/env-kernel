@@ -122,7 +122,7 @@ def _load_dir(directory: Path) -> List[str]:
             continue
         mod_name = f"{dir_name}.{path.stem}"
         try:
-            mod = importlib.import_module(mod_name)
+            importlib.import_module(mod_name)
             out.append(mod_name)
             logger.info("loaded kernel primitive: %s", mod_name)
         except Exception:

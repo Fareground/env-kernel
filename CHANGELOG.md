@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] — 2026-08-10
 
 ### Changed
 - **BREAKING: primitives auto-discovery no longer runs at import time.**
@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   imports arbitrary `.py` files. Downstream code must either call
   `fg_env_kernel.discover()` explicitly or set `KERNEL_PRIMITIVES_DIR`
   (an explicitly configured directory is still honored at import).
+- **`Kernel.load()` / `simulate()` now validate templates before building.**
+  ERROR-severity lint issues (no agent-role entity type, unknown effect
+  operations, unregistered check_types, ...) raise the new `TemplateError`
+  with the full issue list instead of silently running an empty world.
+  Warnings are logged and never block; pass `strict=True` to raise on
+  warnings too. `lint_template()` accepts a `registry=` argument so
+  kernel-scoped custom primitives don't false-positive.
 - `load_world()` now honors the template's `temporal.max_rounds` and passes it
   to the engine (previously silently ignored; the engine default of 100 applied).
 - `SimulationEngine.run()` is resume-aware: after prior `step()` calls it runs

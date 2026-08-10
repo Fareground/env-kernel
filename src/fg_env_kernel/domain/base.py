@@ -360,7 +360,7 @@ class DomainModuleManager:
         for name, mod_data in data.get("modules", {}).items():
             mod_class = registry.get(mod_data.get("type", name))
             if mod_class:
-                module = mod_class(params=mod_data.get("params", {}))
+                module = mod_class(name=name, params=mod_data.get("params", {}))
                 manager._modules[name] = module
             else:
                 # Fallback: try by name

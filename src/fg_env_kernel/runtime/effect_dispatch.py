@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 # Re-export _coerce_effects so callers that imported it from engine
 # can keep doing so via this module too.
-from .engine import (  # noqa: F401 — public for back-compat
+from .engine import (  # noqa: E402, F401 — public for back-compat
     _coerce_effects,
     _is_multi_target,
     _resolve_cell_for_board,
@@ -244,14 +244,14 @@ def _apply_effects_body(
                       f"physics effect on {name!r} needs a numeric value")
                 continue
             old = var.value if var is not None else model.params[name]
-            op_name = effect.operation
-            op_name = op_name.value if hasattr(op_name, "value") else str(op_name)
+            op_raw = effect.operation
+            op_key = op_raw.value if hasattr(op_raw, "value") else str(op_raw)
             new = {"set": num, "add": old + num,
-                   "subtract": old - num, "multiply": old * num}.get(op_name)
+                   "subtract": old - num, "multiply": old * num}.get(op_key)
             if new is None:
                 _drop(effect, "unsupported_physics_op",
                       f"physics target supports set/add/subtract/multiply, "
-                      f"not {op_name!r}")
+                      f"not {op_key!r}")
                 continue
             if var is not None:
                 if var.min is not None:
@@ -843,15 +843,15 @@ def _apply_effects_body(
             # Despawn the entity resolved from effect.target ("actor", "target", or entity_id)
             target_eid = ent.id if ent else (effect.value if isinstance(effect.value, str) else None)
             if target_eid:
-                removed = engine.state.despawn_entity(target_eid)
-                if removed:
+                removed_ent = engine.state.despawn_entity(target_eid)
+                if removed_ent:
                     changes.append({"entity": target_eid, "despawned": True})
                     engine._emit_event(
                         "entity_despawned",
                         actor_id=actor.id if actor else None,
                         target_id=target_eid,
-                        data={"entity_name": removed.name, "entity_type": removed.entity_type},
-                        narrative=f"{removed.name} has been removed from the world.",
+                        data={"entity_name": removed_ent.name, "entity_type": removed_ent.entity_type},
+                        narrative=f"{removed_ent.name} has been removed from the world.",
                     )
 
         elif effect.operation == EffectOperation.SPAWN_ENTITY:
@@ -950,7 +950,6 @@ def _apply_effects_body(
             # Post social content — value = text, or use reasoning
             if engine.state.social and ent:
                 text = str(effect.value) if effect.value else ""
-                from ..social import ContentType as _CT
                 item = engine.state.social.create_content(
                     author_id=ent.id, text=text,
                     round_number=engine.state.temporal.current_round,

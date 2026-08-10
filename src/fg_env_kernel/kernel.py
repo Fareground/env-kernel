@@ -27,6 +27,7 @@ a JSON file — ``simulate()`` and ``Kernel.load`` accept all three.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
@@ -100,6 +101,66 @@ def _coerce_template(template: TemplateLike) -> Union[Dict[str, Any], "WorldTemp
             )
         return loaded
     return template
+
+
+logger = logging.getLogger(__name__)
+
+
+class TemplateError(ValueError):
+    """The template failed static validation (lint errors).
+
+    Raised by ``Kernel.load`` / ``simulate`` before any world is built,
+    so a garbage or typo'd template fails loudly instead of "running"
+    an empty simulation. ``issues`` holds the underlying
+    ``CompileIssue`` objects (errors first).
+    """
+
+    def __init__(self, message: str, issues: List[Any]):
+        super().__init__(message)
+        self.issues = issues
+
+
+def _lint_or_raise(
+    template: Union[Dict[str, Any], "WorldTemplate"],
+    registry: KernelRegistry,
+    strict: bool,
+) -> None:
+    """Run the pipeline's static linter and raise ``TemplateError`` on
+    ERROR-severity issues (or, with ``strict=True``, on warnings too).
+
+    Reuses ``pipeline.lint.lint_template`` — same checks the compile
+    pipeline runs — scoped to this kernel's registry so custom
+    primitives don't false-positive.
+    """
+    from .pipeline.lint import lint_template
+
+    issues = lint_template(template, registry=registry)
+    errors = [i for i in issues if i.severity == "error"]
+    warnings = [i for i in issues if i.severity != "error"]
+
+    for w in warnings:
+        logger.warning("template lint warning: %s: %s", w.path, w.message)
+
+    if errors or (strict and warnings):
+        blocking = errors + (warnings if strict else [])
+        # When errors block the build, surface unknown top-level fields
+        # too — they're usually the typo that caused the errors.
+        if errors and not strict:
+            blocking = blocking + [
+                w for w in warnings if "unknown top-level field" in w.message
+            ]
+        lines = [
+            f"  - [{i.severity}] {i.path}: {i.message}"
+            + (f" (hint: {i.hint})" if getattr(i, "hint", None) else "")
+            for i in blocking
+        ]
+        raise TemplateError(
+            "Template failed validation with "
+            f"{len(errors)} error(s)"
+            + (f" and {len(warnings)} warning(s)" if strict and warnings else "")
+            + ":\n" + "\n".join(lines),
+            blocking,
+        )
 
 
 class World:
@@ -225,17 +286,24 @@ class Kernel:
         on_event: Optional[OnEventFn] = None,
         seed: Optional[int] = None,
         max_rounds: Optional[int] = None,
+        strict: bool = False,
     ) -> World:
         """Build a runnable ``World`` from a template dict, a
         pre-validated ``WorldTemplate``, or a str/Path to a JSON file.
+
+        The template is statically linted first: ERROR-severity issues
+        raise :class:`TemplateError`; warnings are logged (raise them
+        too with ``strict=True``).
 
         The loader honors the template's ``temporal.max_rounds``; an
         explicit ``max_rounds`` argument overrides it.
         """
         from .pipeline.loader import load_world
 
+        coerced = _coerce_template(template)
+        _lint_or_raise(coerced, self.registry, strict)
         state, engine = load_world(
-            _coerce_template(template),
+            coerced,
             seed=self.seed if seed is None else seed,
             decision_fn=decision_fn,
             on_event=on_event,
@@ -254,6 +322,7 @@ def simulate(
     max_rounds: Optional[int] = None,
     on_event: Optional[OnEventFn] = None,
     registry: Optional[KernelRegistry] = None,
+    strict: bool = False,
 ) -> World:
     """One-shot simulation: load a template, run to completion, return
     the finished ``World``.
@@ -277,12 +346,14 @@ def simulate(
         on_event:   callback receiving each event as it is emitted.
         registry:   ``KernelRegistry`` scoping custom primitives;
                     defaults to the process-global registry.
+        strict:     raise :class:`TemplateError` on lint warnings too
+                    (errors always raise).
     """
     from .policies import random_policy
 
     effective_seed = 0 if seed is None else seed
     kernel = Kernel(seed=effective_seed, registry=registry)
-    world = kernel.load(template, on_event=on_event, max_rounds=max_rounds)
+    world = kernel.load(template, on_event=on_event, max_rounds=max_rounds, strict=strict)
     world.engine.decision_fn = (
         agent if agent is not None
         else random_policy(seed=effective_seed, state=world.state)

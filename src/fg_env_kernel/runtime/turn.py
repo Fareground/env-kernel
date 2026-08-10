@@ -11,16 +11,15 @@ the world and applied.
 from __future__ import annotations
 
 import logging
-import random
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING
 
-from ..action import ActionInstance, ActionDefinition, Effect, EffectOperation
+from ..action import ActionInstance
 from ..messaging import Message
-from ..resolution import get_resolution, ResolutionResult
-from .engine import _action_suppresses_chat, _coerce_effects, _is_multi_target
+from ..resolution import get_resolution
+from .engine import _action_suppresses_chat
 
 if TYPE_CHECKING:
-    from .engine import SimulationEngine
+    pass
 
 logger = logging.getLogger(__name__)
 

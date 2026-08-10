@@ -59,7 +59,7 @@ effects can use `invoke_action`, `for_each`, expressions, etc.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)

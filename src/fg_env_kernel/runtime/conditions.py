@@ -13,10 +13,10 @@ loosely — anything with the right attributes works.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .engine import SimulationEngine
+    pass
 
 logger = logging.getLogger(__name__)
 

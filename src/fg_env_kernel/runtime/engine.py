@@ -16,13 +16,12 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 if TYPE_CHECKING:
     from ..registry import KernelRegistry
+    from ..triggers import TriggerSpec
 
 from ..state import WorldState
-from ..action import ActionInstance, ActionDefinition, Effect, EffectOperation
-from ..messaging import Message
-from ..resolution import get_resolution, ResolutionResult
+from ..action import ActionInstance, Effect, EffectOperation
+from ..resolution import ResolutionResult
 from ..visibility import PerceptionBuilder, TrendAnalyzer
-from ..event import SimEvent
 from ..temporal import TurnOrderResolver
 from ..phase_handlers import get_phase_handler
 
@@ -76,7 +75,7 @@ def _coerce_effects(raw: Any, registry: Optional["KernelRegistry"] = None) -> Li
     `effects_on_success`:
       { operation: "add", target: "actor", field: "money", value: 50 }
     """
-    from ..action import Effect, EffectOperation
+    from ..action import Effect
     out: List[Effect] = []
     if not raw:
         return out
@@ -518,7 +517,7 @@ class SimulationEngine:
         """Execute a single round with all phases."""
         try:
             self._run_round_inner()
-        except TypeError as e:
+        except TypeError:
             import traceback
             logger.error(f"TypeError in round execution:\n{traceback.format_exc()}")
             raise
@@ -1080,7 +1079,7 @@ class SimulationEngine:
         """Execute a single agent's turn: perceive -> decide -> resolve -> apply."""
         try:
             self._run_agent_turn_inner(entity_id)
-        except TypeError as e:
+        except TypeError:
             import traceback
             logger.error(f"TypeError in agent turn for {entity_id}:\n{traceback.format_exc()}")
             raise

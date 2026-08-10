@@ -9,7 +9,7 @@ This layer sits *on top* of PerceptionBuilder: it ingests each turn's
 perception and accumulates a persistent picture of the world.
 """
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 
@@ -235,16 +235,16 @@ class AgentWorldModel:
             del self._observations[sid]
 
         # Decay spatial memories
-        for loc_id, entries in list(self._spatial_memories.items()):
-            surviving = []
-            for entry in entries:
-                age = current_round - entry.round_observed
+        for loc_id, sm_entries in list(self._spatial_memories.items()):
+            sm_surviving = []
+            for sm_entry in sm_entries:
+                age = current_round - sm_entry.round_observed
                 if age > 0:
-                    entry.confidence = math.exp(-self.confidence_decay_rate * age)
-                if entry.confidence >= self.PRUNE_THRESHOLD:
-                    surviving.append(entry)
-            if surviving:
-                self._spatial_memories[loc_id] = surviving
+                    sm_entry.confidence = math.exp(-self.confidence_decay_rate * age)
+                if sm_entry.confidence >= self.PRUNE_THRESHOLD:
+                    sm_surviving.append(sm_entry)
+            if sm_surviving:
+                self._spatial_memories[loc_id] = sm_surviving
             else:
                 del self._spatial_memories[loc_id]
 

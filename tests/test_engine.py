@@ -1,5 +1,4 @@
 """Tests for kernel/engine.py -- SimulationEngine with mock decisions."""
-import pytest
 from fg_env_kernel.state import WorldState
 from fg_env_kernel.engine import SimulationEngine
 from fg_env_kernel.entity import EntityType, Entity
@@ -9,7 +8,6 @@ from fg_env_kernel.action import (
     Operator, EffectOperation,
 )
 from fg_env_kernel.types import PropertySchema, PropertyType
-from fg_env_kernel.relations import RelationType
 
 
 def _build_simple_world() -> WorldState:

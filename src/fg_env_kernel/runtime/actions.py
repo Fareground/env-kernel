@@ -10,16 +10,15 @@ methods are now 1-line delegations into this module.
 from __future__ import annotations
 
 import logging
-import random
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
-from ..action import ActionInstance, ActionDefinition, Effect, EffectOperation
+from ..action import ActionInstance
 from ..messaging import Message
-from ..resolution import get_resolution, ResolutionResult
+from ..resolution import get_resolution
 from .engine import _action_suppresses_chat
 
 if TYPE_CHECKING:
-    from .engine import SimulationEngine
+    pass
 
 logger = logging.getLogger(__name__)
 

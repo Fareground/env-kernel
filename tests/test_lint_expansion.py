@@ -5,7 +5,6 @@ agent hit:
   - unquoted bareword comparisons in expressions: `== neutral`
   - $-refs that don't resolve: `$actor.entity_id` (should be `$actor.id`)
 """
-import pytest
 
 from fg_env_kernel import lint_template
 

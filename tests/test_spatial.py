@@ -1,6 +1,4 @@
 """Tests for kernel/spatial.py"""
-import math
-import pytest
 from fg_env_kernel.spatial import NoSpace, GridSpace, GraphSpace, Continuous2DSpace
 
 

@@ -116,7 +116,7 @@ from .action import ActionInstance
 from .event import SimEvent
 from .state import WorldState
 from .runtime.engine import SimulationEngine
-from .kernel import DecisionFn, Kernel, OnEventFn, World, simulate
+from .kernel import DecisionFn, Kernel, OnEventFn, TemplateError, World, simulate
 from .policies import random_policy
 from .physics import (
     PhysicsModel,
@@ -185,6 +185,7 @@ __all__ = [
     "simulate",
     "random_policy",
     "Kernel",
+    "TemplateError",
     "World",
     "DecisionFn",
     "OnEventFn",

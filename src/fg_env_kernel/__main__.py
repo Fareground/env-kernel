@@ -67,8 +67,8 @@ def cmd_compile(args: argparse.Namespace) -> int:
 
     if not result.ok:
         print(f"\ncompile FAILED ({len(result.errors)} error(s))", file=sys.stderr)
-        for e in result.errors:
-            print(f"  {e}", file=sys.stderr)
+        for err in result.errors:
+            print(f"  {err}", file=sys.stderr)
         return 1
 
     print(f"compile OK — {len(result.state.entities)} entities, "
@@ -194,7 +194,7 @@ def cmd_scaffold_env(args: argparse.Namespace) -> int:
     if target.exists() and not args.force:
         print(f"{target} already exists; pass --force to overwrite", file=sys.stderr)
         return 1
-    pkg = scaffold_env(target, args.name)
+    scaffold_env(target, args.name)
     print(f"scaffolded env '{args.name}' at {target}")
     print("  files: meta.json, overview.md, template.json")
     print(f"  next: edit, then `python -m fg_env_kernel compile {target}/template.json`")
@@ -257,8 +257,8 @@ def cmd_env_info(args: argparse.Namespace) -> int:
                 print(f"  ({len(pkg.compile_result.warnings)} warnings)")
         else:
             print(f"\ncompile: FAILED ({len(pkg.compile_result.errors)} errors)")
-            for e in pkg.compile_result.errors:
-                print(f"  {e}")
+            for err in pkg.compile_result.errors:
+                print(f"  {err}")
             return 1
     return 0
 
@@ -308,10 +308,10 @@ def cmd_lint(args: argparse.Namespace) -> int:
         print(f"[warning] {w.path}: {w.message}")
         if w.hint:
             print(f"  hint: {w.hint}")
-    for e in errors:
-        print(f"[error] {e.path}: {e.message}", file=sys.stderr)
-        if e.hint:
-            print(f"  hint: {e.hint}", file=sys.stderr)
+    for err in errors:
+        print(f"[error] {err.path}: {err.message}", file=sys.stderr)
+        if err.hint:
+            print(f"  hint: {err.hint}", file=sys.stderr)
 
     if errors:
         print(f"\nlint FAILED ({len(errors)} error, {len(warnings)} warning)", file=sys.stderr)

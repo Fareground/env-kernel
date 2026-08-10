@@ -56,7 +56,7 @@ WinPredicate can consult — see `BoardModule.snapshot_for_pattern()`.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 from .domain_module import DomainModule
 
@@ -332,6 +332,9 @@ class BoardModule(DomainModule):
         if unreachable. Useful for Risk-style attack range checks."""
         if self._kind != "graph":
             return None
+        if not (isinstance(a, str) and isinstance(b, str)):
+            # graph nodes are string names; grid/ring positions can't match
+            return None
         if a == b:
             return 0
         from collections import deque
@@ -506,7 +509,10 @@ class BoardModule(DomainModule):
         # Build a 2-D snapshot of the place-marks only (skip entity
         # occupancy — pattern detection is about the marks).
         grid: List[List[Any]] = [[None] * self._cols for _ in range(self._rows)]
-        for (r, c), v in self._cell_marks.items():
+        for key, v in self._cell_marks.items():
+            if not isinstance(key, tuple):
+                continue  # linear-ring int keys never occur on grid boards
+            r, c = key
             if 0 <= r < self._rows and 0 <= c < self._cols:
                 grid[r][c] = v
         rows, cols = self._rows, self._cols
@@ -587,7 +593,10 @@ class BoardModule(DomainModule):
         grid: List[List[Any]] = [[None] * self._cols for _ in range(self._rows)]
 
         # Place-marks first.
-        for (r, c), mark in self._cell_marks.items():
+        for key, mark in self._cell_marks.items():
+            if not isinstance(key, tuple):
+                continue  # linear-ring int keys never occur on grid boards
+            r, c = key
             if 0 <= r < self._rows and 0 <= c < self._cols:
                 grid[r][c] = mark
 
@@ -595,7 +604,7 @@ class BoardModule(DomainModule):
         agents = list(state.get_agent_entities()) if hasattr(state, "get_agent_entities") else []
         for ent in agents:
             p = self.position_of(ent)
-            if p is None or not self.in_bounds(p):
+            if p is None or not isinstance(p, tuple) or not self.in_bounds(p):
                 continue
             r, c = p
             if grid[r][c] is not None:
@@ -958,6 +967,8 @@ def _sliding(
     board: BoardModule, pos: Position, dr: int, dc: int, entity: Any, state: Any,
 ) -> Iterator[Position]:
     """Slide in (dr, dc) until off-board or blocked."""
+    if not isinstance(pos, tuple):
+        return  # sliding moves only exist on grid boards
     r, c = pos
     step = 1
     while True:

@@ -4,7 +4,6 @@ These are the kernel-registered effect ops that let JSON express
 multi-step / aggregate mechanics. Together with the state-query
 functions, they're what makes the engine truly genre-agnostic.
 """
-import pytest
 
 from fg_env_kernel import compile_template
 from fg_env_kernel.action import ActionInstance

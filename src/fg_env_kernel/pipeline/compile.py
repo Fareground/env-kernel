@@ -40,7 +40,7 @@ After: one call returns a structured report. The agent can read
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional
 
 from pydantic import ValidationError
 
@@ -272,7 +272,7 @@ def _jsonpath_from_loc(loc: tuple) -> str:
     return ".".join(parts)
 
 
-def _hint_for_validation_error(err: Dict[str, Any]) -> str:
+def _hint_for_validation_error(err: Mapping[str, Any]) -> str:
     """Try to suggest a fix for common Pydantic errors."""
     msg = (err.get("msg") or "").lower()
     loc = err.get("loc") or ()

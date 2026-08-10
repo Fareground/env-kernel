@@ -1,5 +1,4 @@
 """Tests for kernel/resource.py"""
-import pytest
 from fg_env_kernel.resource import ResourceType, ResourcePool
 
 

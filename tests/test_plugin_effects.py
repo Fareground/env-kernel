@@ -9,7 +9,6 @@ import pytest
 
 from fg_env_kernel import EffectContext, effect, registry
 from fg_env_kernel.action import (
-    ActionDefinition,
     Effect,
     EffectOperation,
 )

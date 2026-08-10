@@ -252,8 +252,8 @@ class TestRegistryIsolation:
         world.run()
         assert world.terminated_by == "instant"
 
-        # Default kernel doesn't know the check_type — never fires.
-        plain = Kernel().load(template, decision_fn=_bid(2.0))
-        plain.run()
-        assert plain.terminated_by is None
-        assert plain.current_round == 3
+        # Default kernel doesn't know the check_type — the lint gate
+        # rejects the template up front instead of silently never firing.
+        from fg_env_kernel import TemplateError
+        with pytest.raises(TemplateError, match="always_done"):
+            Kernel().load(template, decision_fn=_bid(2.0))

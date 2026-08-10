@@ -9,7 +9,7 @@ Backward-compatible: DISCRETE mode (the default) is unaffected.
 import heapq
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 # ---------------------------------------------------------------------------

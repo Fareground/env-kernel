@@ -548,7 +548,7 @@ def _call_function(
         if len(args) < 2 or state is None:
             return 0
         et_name, prop = str(args[0]), str(args[1])
-        total = 0
+        total = 0.0
         for e in state.entities.values():
             if e.entity_type != et_name:
                 continue
@@ -599,10 +599,10 @@ def _call_function(
         if len(args) < 2 or state is None:
             return []
         eid, rel = _eid(args[0]), str(args[1])
-        out = {e.to_entity for e in state.relations.get_outgoing(eid, rel)}
-        out |= {e.from_entity for e in state.relations.get_incoming(eid, rel)}
-        out.discard(eid)
-        return sorted(out)
+        nbr_ids = {e.to_entity for e in state.relations.get_outgoing(eid, rel)}
+        nbr_ids |= {e.from_entity for e in state.relations.get_incoming(eid, rel)}
+        nbr_ids.discard(eid)
+        return sorted(nbr_ids)
 
     if name in ("neighbor_count", "neighbor_sum"):
         # $neighbor_count(entity_id, relation)        — degree
@@ -687,15 +687,15 @@ def _call_function(
         if a == b:
             return 0
         seen = {a}
-        frontier = [(a, 0)]
-        while frontier:
-            node, d = frontier.pop(0)
-            for nb in state.adjacency.get(node, []):
+        dist_frontier = [(a, 0)]
+        while dist_frontier:
+            nd, d = dist_frontier.pop(0)
+            for nb in state.adjacency.get(nd, []):
                 if nb == b:
                     return d + 1
                 if nb not in seen:
                     seen.add(nb)
-                    frontier.append((nb, d + 1))
+                    dist_frontier.append((nb, d + 1))
         return -1
 
     if name == "path_exists":
@@ -854,7 +854,7 @@ def _call_function(
         if src == dst:
             return [src]
         # BFS with parent pointers
-        parents = {src: None}
+        parents: Dict[str, Optional[str]] = {src: None}
         frontier = [src]
         found = False
         while frontier and not found:

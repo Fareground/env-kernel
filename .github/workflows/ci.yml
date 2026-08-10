@@ -20,4 +20,5 @@ jobs:
           cache: pip
       - run: pip install -e ".[dev]"
       - run: ruff check .
+      - run: mypy
       - run: pytest -q

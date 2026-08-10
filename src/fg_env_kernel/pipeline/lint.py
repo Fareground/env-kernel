@@ -23,24 +23,28 @@ silent rather than crying wolf.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Set
 
 from .compile import CompileIssue
 
 
-def lint_template(template: Any) -> List[CompileIssue]:
+def lint_template(template: Any, *, registry: Any = None) -> List[CompileIssue]:
     """Run all static checks against a ``WorldTemplate``.
 
     Accepts either a ``WorldTemplate`` Pydantic instance or a dict.
     Returns a list of ``CompileIssue`` objects — both errors and
     warnings mixed. The caller (typically ``compile_template``) sorts
-    them by severity."""
+    them by severity.
+
+    ``registry`` scopes the registry-dependent checks (resolution
+    archetypes, termination check_types, custom effect ops) to a
+    specific ``KernelRegistry``; defaults to the process-global one."""
     if hasattr(template, "model_dump"):
         data = template.model_dump()
     else:
         data = dict(template)
 
-    ctx = _LintCtx(data)
+    ctx = _LintCtx(data, registry=registry)
     issues: List[CompileIssue] = []
 
     _check_entity_types_have_agent(ctx, issues)
@@ -72,8 +76,9 @@ def lint_template(template: Any) -> List[CompileIssue]:
 class _LintCtx:
     """Pre-computed indices over the template for fast lookups."""
 
-    def __init__(self, data: Dict[str, Any]):
+    def __init__(self, data: Dict[str, Any], registry: Any = None):
         self.data = data
+        self.registry = registry  # KernelRegistry or None (→ global)
         # entity_type name → set of property names defined on it
         self.entity_type_props: Dict[str, Set[str]] = {}
         # entity_type name → role
@@ -237,7 +242,8 @@ def _check_action_resolution_archetype_registered(
     """Every action's resolution_archetype must be a registered name."""
     try:
         from ..resolution import RESOLUTION_REGISTRY
-        from ..registry import registry as _kreg
+        from ..registry import registry as _global_reg
+        _kreg = ctx.registry if ctx.registry is not None else _global_reg
         known = set(RESOLUTION_REGISTRY.keys()) | set(_kreg.resolutions.keys())
     except Exception:
         return  # if we can't reach the registry, skip rather than false-positive
@@ -357,7 +363,8 @@ def _check_termination_check_types_registered(
     """Termination check_type strings must be either built-in
     (compound_and/or, expr) or registered in registry.terminations."""
     try:
-        from ..registry import registry as _kreg
+        from ..registry import registry as _global_reg
+        _kreg = ctx.registry if ctx.registry is not None else _global_reg
         known = set(_kreg.terminations.keys()) | {"expr", "compound_and", "compound_or"}
     except Exception:
         return
@@ -643,7 +650,8 @@ def _check_unknown_spec_fields(ctx: _LintCtx, issues: List[CompileIssue]) -> Non
     for i, dm in enumerate(ctx.data.get("domain_modules", [])):
         unknown(dm, loader.DomainModuleSpec, f"domain_modules[{i}]")
     try:
-        from ..registry import registry as _kreg
+        from ..registry import registry as _global_reg
+        _kreg = ctx.registry if ctx.registry is not None else _global_reg
         _custom_effects = set(_kreg.effects.keys())
     except Exception:  # noqa: BLE001 — registry optional at lint time
         _custom_effects = set()

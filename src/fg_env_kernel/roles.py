@@ -16,7 +16,7 @@ visibility predicate. Domain modules wire it into their own game logic
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Optional, Set
+from typing import Dict, List, Optional, Set
 
 
 @dataclass

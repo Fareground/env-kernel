@@ -1,7 +1,7 @@
 """Core type system for the simulation kernel."""
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, List, Optional, Union
 
 
 class PropertyType(Enum):

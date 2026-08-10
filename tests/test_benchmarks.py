@@ -18,17 +18,14 @@ dependency — these are just timed assertions with generous margins.
 """
 import time
 
-import pytest
 
 from fg_env_kernel import (
     compile_template,
     enable_engine_metrics,
     engine_metrics_enabled,
-    metrics,
     replay,
     smoke_test,
 )
-from fg_env_kernel.action import ActionInstance
 
 
 # ---------------------------------------------------------------------------

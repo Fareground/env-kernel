@@ -4,7 +4,6 @@ A single JSON shape that subsumes triggers + conditional effects +
 state machine transitions for the common "when X then Y" pattern.
 This is the framework's forward-chaining inference primitive.
 """
-import pytest
 
 from fg_env_kernel import compile_template
 from fg_env_kernel.action import ActionInstance
@@ -79,8 +78,6 @@ def test_derived_rule_marks_unit_dead_when_hp_zero():
 def test_once_per_entity_prevents_re_firing():
     """Without once_per_entity, a death rule would re-fire every round
     while hp stays ≤ 0. With it, the rule fires exactly once."""
-    fire_counter = {"n": 0}
-
     def decide(eid, perc, va):
         return ActionInstance(action_name="hurt_self", actor_id=eid) if "hurt_self" in va else None
 

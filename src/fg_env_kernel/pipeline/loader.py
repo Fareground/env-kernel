@@ -34,7 +34,10 @@ references them by name. The agent never emits Python.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
+
+if TYPE_CHECKING:
+    from ..continuous_time import ContinuousTemporalModel
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -49,7 +52,7 @@ from ..action import (
 from ..engine import SimulationEngine, TerminationCondition
 from ..entity import Entity, EntityType
 from ..factions import Faction
-from ..resource import ResourcePool, ResourceType
+from ..resource import ResourceType
 from ..registry import KernelRegistry, registry as _global_registry
 from ..relations import RelationType
 from ..spatial import Continuous2DSpace, GraphSpace, GridSpace, NoSpace
@@ -306,13 +309,13 @@ def build_world_state(
     state = WorldState()
 
     _apply_tables_and_runtime(state, schema)
-    state._schema_triggers = schema.get("triggers") or []
+    state._schema_triggers = schema.get("triggers") or []  # type: ignore[attr-defined]  # loader-injected runtime attr, read via getattr()
     # World brief — name + description + rules markdown. Injected into
     # every agent's perception under `world_brief` so playing LLMs read
     # the rules. The agent's chain-of-thought references these for any
     # action choice. Stored as a plain dict on state for easy perception
     # assembly.
-    state._world_brief = {
+    state._world_brief = {  # type: ignore[attr-defined]  # loader-injected runtime attr, read via getattr()
         "name": schema.get("name", ""),
         "description": schema.get("description", ""),
         "rules": schema.get("rules", ""),
@@ -322,9 +325,9 @@ def build_world_state(
     derived = schema.get("derived_rules") or []
     if derived:
         from ..derived_rules import DerivedRulesEngine
-        state._derived_rules = DerivedRulesEngine(derived)
+        state._derived_rules = DerivedRulesEngine(derived)  # type: ignore[attr-defined]  # loader-injected runtime attr, read via getattr()
     else:
-        state._derived_rules = None
+        state._derived_rules = None  # type: ignore[attr-defined]  # loader-injected runtime attr, read via getattr()
 
     _apply_spatial(state, schema.get("spatial") or {})
     _apply_temporal(state, schema.get("temporal") or {})
@@ -954,7 +957,7 @@ def _apply_connectors(state: WorldState, specs: List[Dict[str, Any]]) -> None:
             connector_type=ctype,
             endpoint=spec.get("config", {}).get("endpoint", ""),
         )
-        mgr.add_connector(ConnectorInstance(config=config))
+        mgr.add_instance(ConnectorInstance(config=config))
     state.connectors = mgr
 
 
@@ -1009,9 +1012,9 @@ def _apply_crowd(state: WorldState, config: Dict[str, Any]) -> None:
     mgr = CrowdAgentManager()
     state.crowd_agents = mgr
     if config and config.get("enabled"):
-        state._crowd_config = config
+        state._crowd_config = config  # type: ignore[attr-defined]  # loader-injected runtime attr, read via getattr()
     else:
-        state._crowd_config = config or {
+        state._crowd_config = config or {  # type: ignore[attr-defined]  # loader-injected runtime attr, read via getattr()
             "enabled": True,
             "crowd_ratio": 0,
             "behavior_mapping": {},

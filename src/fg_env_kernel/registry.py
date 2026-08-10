@@ -41,7 +41,7 @@ from __future__ import annotations
 import contextlib
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Iterator, List, Optional, TypeVar
+from typing import Any, Dict, Iterator, List, Optional, TypeVar
 
 T = TypeVar("T")
 

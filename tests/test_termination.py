@@ -6,7 +6,6 @@ Covers:
   - Winner resolvers return the expected dict
   - Engine delegates termination to the registry path
 """
-import random
 
 import pytest
 

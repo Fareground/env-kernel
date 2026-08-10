@@ -92,7 +92,7 @@ PREDICATE LIBRARY (the `when` clause)
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set
 
 from .domain_module import DomainModule
 
@@ -362,8 +362,8 @@ class PhaseStateMachineModule(DomainModule):
             for a in alive:
                 if bool(a.get("folded")) or bool(a.get("eliminated")):
                     continue
-                actions = set(self._actions_in_state.get(a.id, []))
-                if not (actions & {"call", "check", "all_in", "raise"}):
+                acts = set(self._actions_in_state.get(a.id, []))
+                if not (acts & {"call", "check", "all_in", "raise"}):
                     return False
             return True
 

@@ -5,10 +5,9 @@ as context for agent decisions and world events. This module defines the
 infrastructure; actual connector implementations are registered separately.
 """
 import time
-from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Callable, Dict, List, Optional
 
 
 class ConnectorType(Enum):
@@ -363,7 +362,6 @@ class ConnectorManager:
             # Set property on all entities of the target type
             entities = state.get_entities_by_type(rule.target_entity_type) if hasattr(state, 'get_entities_by_type') else []
             for entity in entities:
-                old_val = entity.get(rule.target_field) if hasattr(entity, 'get') else None
                 if hasattr(entity, 'set'):
                     entity.set(rule.target_field, value)
             return {

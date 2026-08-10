@@ -31,7 +31,7 @@ so existing managers don't need to grow no-op stubs to comply.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Protocol, runtime_checkable
+from typing import Any, Dict, Protocol, runtime_checkable
 
 
 @runtime_checkable

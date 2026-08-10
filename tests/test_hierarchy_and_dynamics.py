@@ -63,7 +63,6 @@ class TestPropertyDynamicsLoading:
         assert state.property_dynamics.drift_rules[0].name == "sentiment_decay"
 
     def test_drift_actually_moves_the_property(self):
-        import random
 
         state = build_world_state(self.SCHEMA)
         before = state.get_entity("t1").properties["sentiment"]

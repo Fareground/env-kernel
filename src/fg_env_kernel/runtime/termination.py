@@ -15,7 +15,7 @@ import logging
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 if TYPE_CHECKING:
-    from .engine import SimulationEngine, TerminationCondition
+    from .engine import TerminationCondition
 
 logger = logging.getLogger(__name__)
 
@@ -320,24 +320,24 @@ def _evaluate_condition(engine, tc: TerminationCondition) -> bool:
         mgr = engine.state.factions
         if mgr is None:
             return False
-        counts: Dict[str, int] = {}
+        fac_counts: Dict[str, int] = {}
         for e in engine.state.get_agent_entities():
             if not e.alive:
                 continue
             fac = mgr.get_entity_faction(e.id)
             if not fac:
                 continue
-            counts[fac] = counts.get(fac, 0) + 1
-        if not counts:
+            fac_counts[fac] = fac_counts.get(fac, 0) + 1
+        if not fac_counts:
             return False
         if rule == "last_faction_standing":
-            surviving = [f for f, n in counts.items() if n > 0]
+            surviving = [f for f, n in fac_counts.items() if n > 0]
             return len(surviving) == 1
         if rule == "majority":
-            total = sum(counts.values())
+            total = sum(fac_counts.values())
             if total == 0:
                 return False
-            top = max(counts.values())
+            top = max(fac_counts.values())
             return (top / total) * 100.0 > threshold_pct
         return False
 
@@ -551,19 +551,19 @@ def _resolve_winner(engine, tc) -> Dict[str, Any]:
         mgr = engine.state.factions
         if mgr is None:
             return {}
-        counts: Dict[str, List[Any]] = {}
+        faction_members: Dict[str, List[Any]] = {}
         for e in engine.state.get_agent_entities():
             if not e.alive:
                 continue
             fac = mgr.get_entity_faction(e.id)
             if not fac:
                 continue
-            counts.setdefault(fac, []).append(e)
-        if not counts:
+            faction_members.setdefault(fac, []).append(e)
+        if not faction_members:
             return {}
         # Winner = faction with the most alive members
-        winning_faction = max(counts.keys(), key=lambda f: len(counts[f]))
-        members = counts[winning_faction]
+        winning_faction = max(faction_members.keys(), key=lambda f: len(faction_members[f]))
+        members = faction_members[winning_faction]
         return {
             "winning_faction": winning_faction,
             "winner_ids": [e.id for e in members],

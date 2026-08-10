@@ -333,7 +333,7 @@ class NegotiationManager:
 
         Returns list of transfer event dicts.
         """
-        events = []
+        events: List[Dict[str, Any]] = []
         terms = agreement.terms
         if not terms:
             return events
@@ -388,7 +388,7 @@ class NegotiationManager:
         Winner pays the winning bid amount to the auctioneer.
         Returns list of transfer event dicts.
         """
-        events = []
+        events: List[Dict[str, Any]] = []
         if not auction.winner_id or auction.state != "awarded":
             return events
 
@@ -614,7 +614,7 @@ class NegotiationManager:
 
     def get_active_for_entity(self, entity_id: str, current_round: int = 0) -> Dict[str, Any]:
         """Get all active negotiations, agreements, and auctions for an entity."""
-        result = {"negotiations": [], "agreements": [], "auctions": []}
+        result: Dict[str, List[Any]] = {"negotiations": [], "agreements": [], "auctions": []}
 
         for neg in self._negotiations.values():
             if entity_id in neg.participant_ids and neg.state in (

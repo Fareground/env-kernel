@@ -196,7 +196,7 @@ class BoundedRationalityConfig:
 # ---------------------------------------------------------------------------
 
 # Personality trait -> emotional/cognitive mappings
-PERSONALITY_MAPPINGS = {
+PERSONALITY_MAPPINGS: Dict[str, Dict[str, Any]] = {
     "aggressive": {"anger_sensitivity": 1.5, "fear_sensitivity": 0.5, "biases": ["negativity_bias"]},
     "cautious": {"fear_sensitivity": 1.5, "anger_sensitivity": 0.5, "biases": ["loss_aversion", "status_quo_bias"]},
     "charismatic": {"trust_sensitivity": 1.5, "biases": ["bandwagon"]},

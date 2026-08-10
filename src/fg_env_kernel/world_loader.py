@@ -5,7 +5,7 @@ importing from ``fg_env_kernel`` (the public API) — direct imports
 of this module continue to work as a transition convenience.
 """
 from .pipeline.loader import *  # noqa: F401,F403
-from .pipeline.loader import (  # explicit re-exports for IDEs
+from .pipeline.loader import (  # noqa: F401 — explicit re-exports for IDEs
     WorldTemplate,
     EntityTypeSpec,
     ResourceTypeSpec,

@@ -1,8 +1,7 @@
 """Tests for kernel/social.py"""
-import pytest
 from unittest.mock import MagicMock
 from fg_env_kernel.social import (
-    SocialRelationType, ContentType, ContentVisibility,
+    ContentType, ContentVisibility,
     ContentItem, SocialGraph, ReputationSystem, ViralSpreadModel,
     Feed, SocialPlatformManager,
 )
@@ -279,7 +278,7 @@ class TestSocialPlatformManager:
         mgr = SocialPlatformManager()
         item1 = mgr.create_content("a1", "Viral post")
         item1.reactions["like"] = 100
-        item2 = mgr.create_content("a2", "Normal post")
+        mgr.create_content("a2", "Normal post")
         trending = mgr.get_trending(limit=2)
         assert trending[0].text == "Viral post"
 

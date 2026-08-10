@@ -9,7 +9,7 @@ import math
 import random
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -203,7 +203,7 @@ class PropertyDynamicsEngine:
     # -- Drift application --
 
     def _apply_drift_rules(self, state: Any, round_number: int) -> List[Dict]:
-        changes = []
+        changes: List[Dict[str, Any]] = []
         for rule in self.drift_rules:
             if not rule.active:
                 continue
@@ -280,7 +280,7 @@ class PropertyDynamicsEngine:
     # -- Conditional spawning --
 
     def _check_spawn_rules(self, state: Any, round_number: int) -> List[Dict]:
-        changes = []
+        changes: List[Dict[str, Any]] = []
         for rule in self.spawn_rules:
             # Check cooldown
             if round_number - rule._last_spawn_round < rule.cooldown:
@@ -359,7 +359,7 @@ class PropertyDynamicsEngine:
     # -- Cascade evaluation --
 
     def _evaluate_cascades(self, state: Any, round_number: int) -> List[Dict]:
-        changes = []
+        changes: List[Dict[str, Any]] = []
         for rule in self.cascade_rules:
             # Check if active cascade has expired
             if rule._active_since is not None and rule.duration > 0:

@@ -3,8 +3,8 @@
 Skills gate actions via preconditions, modify resolution outcomes, and
 enable RPG-style progression, specialization, and emergent expertise.
 """
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+from typing import Dict, Optional
 
 
 @dataclass
@@ -139,7 +139,7 @@ class SkillTracker:
         tracker = cls()
         for entity_id, skills in (data or {}).items():
             tracker._skills[entity_id] = {
-                name: SkillEntry(level=s.get("level", 0.0), xp=s.get("xp", 0.0))
+                name: SkillEntry(skill_name=name, level=s.get("level", 0.0), xp=s.get("xp", 0.0))
                 for name, s in skills.items()
             }
         return tracker

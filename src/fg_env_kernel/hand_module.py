@@ -47,7 +47,7 @@ from __future__ import annotations
 
 import logging
 import random as _random
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from .domain_module import DomainModule
 

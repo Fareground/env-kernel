@@ -467,7 +467,6 @@ class WorldState:
             return []
 
         active_goals = self.goals.get_active_goals(entity_id)
-        round_num = self.temporal.current_round
 
         scored: List[Tuple[str, float, Optional[str]]] = []
         for action_name in valid:

@@ -3,7 +3,7 @@
 Agents can send messages to each other -- direct, broadcast, or faction-wide.
 Messages appear in perception and influence agent decisions.
 """
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 

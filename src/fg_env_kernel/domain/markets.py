@@ -30,7 +30,6 @@ class PredictionMarketModule(DomainModule):
         super().__init__(name=name, params=params)
         liq = float(self._params.get("initial_liquidity", 1000))
         initial_price = float(self._params.get("initial_price", 0.5))
-        import logging
         logging.getLogger(__name__).info(
             "PredictionMarketModule init: initial_price=%.4f, liquidity=%.0f, params=%s",
             initial_price, liq, self._params,
@@ -101,7 +100,6 @@ class PredictionMarketModule(DomainModule):
           avg_size: float — average position size in shares
         """
         import math
-        import random as _rng
 
         config = self._params.get("initial_positions")
         if not config or not isinstance(config, dict):
@@ -131,7 +129,7 @@ class PredictionMarketModule(DomainModule):
                 continue
 
             # Position size: log-normal around avg_size (few large, many small)
-            size = max(1.0, rng.lognormvariate(math.log(avg_size), 0.8))
+            size = max(1.0, self._rng.lognormvariate(math.log(avg_size), 0.8))
             # Cost = size * price (approximate — real CPMM is nonlinear but this
             # is for initialization, not an actual trade through the AMM)
             direction = "yes" if belief > price else "no"
@@ -215,7 +213,7 @@ class PredictionMarketModule(DomainModule):
         state: Any,
     ) -> List[Dict[str, Any]]:
         """Update pools and positions after a trade."""
-        changes = []
+        changes: List[Dict[str, Any]] = []
         if not success:
             return changes
 
@@ -517,7 +515,6 @@ class SecuritiesTradingModule(DomainModule):
             if last_seed > 0:
                 self._current_price = last_seed
 
-        import logging
         logging.getLogger(__name__).info(
             "SecuritiesTradingModule init: ticker=%s, price=%.4f, liquidity=%.0f, seeded=%d bars",
             self._ticker, self._current_price, self._liquidity, len(self._price_history),

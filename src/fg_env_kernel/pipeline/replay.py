@@ -32,7 +32,6 @@ import time
 from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Union
 
-from ..action import ActionInstance
 
 
 @dataclass

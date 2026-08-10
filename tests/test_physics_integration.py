@@ -7,7 +7,6 @@ import pytest
 
 from fg_env_kernel import (
     ContinuousTemporalModel,
-    PhysicsModel,
     TimeMode,
     build_world_state,
     load_world,

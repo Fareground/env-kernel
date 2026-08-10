@@ -12,7 +12,6 @@ import pytest
 
 from fg_env_kernel.entity import Entity, EntityType
 from fg_env_kernel.kernel_module import (
-    KernelModule,
     collect_snapshots,
     dispatch_despawn,
     dispatch_round_start,

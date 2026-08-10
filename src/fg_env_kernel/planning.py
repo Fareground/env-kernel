@@ -418,7 +418,7 @@ class PlanManager:
 
         Returns dict with optional "plan" and "agent_models" keys.
         """
-        result = {}
+        result: Dict[str, Any] = {}
 
         # Active plan
         plan = self.get_active_plan(entity_id)

@@ -560,7 +560,7 @@ class SetupPlacementHandler(PhaseHandler):
                 if any(cell in placed or cell in forbidden for cell in candidate):
                     continue
                 placed.extend(candidate)
-            ag.set("ship_grid", [list(c) for c in placed])
+            ag.set("ship_grid", [list(c) for c in placed])  # type: ignore[misc]  # PropertyValue is narrower than the runtime property store
             events.append({
                 "type": "piece_placed",
                 "entity_id": ag.id,

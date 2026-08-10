@@ -3,10 +3,15 @@
 Runnable, end-to-end examples of the SDK facade. From a clone of the repo:
 
 ```bash
+PYTHONPATH=src python3 examples/00_simulate.py
 PYTHONPATH=src python3 examples/quickstart.py
 ```
 
 (With the package pip-installed, drop the `PYTHONPATH=src`.)
+
+## 00_simulate.py
+
+The one-liner: `simulate(path_to_template)` loads the tic-tac-toe template, lets the built-in seeded random policy play every turn, and returns the finished `World` — then `world.summary()` reads the outcome. Zero configuration; deterministic given the seed.
 
 ## quickstart.py
 

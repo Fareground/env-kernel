@@ -1,4 +1,13 @@
-"""SDK facade — the two-object entry point for integrators.
+"""SDK facade — the one-line and two-object entry points for integrators.
+
+One line (built-in random agent, deterministic given the seed):
+
+    from fg_env_kernel import simulate
+
+    world = simulate(template)
+    print(world.summary())
+
+Two objects, full control:
 
     from fg_env_kernel import Kernel
 
@@ -11,9 +20,15 @@
 ``(WorldState, SimulationEngine)`` pair produced by the canonical
 ``pipeline.loader.load_world`` and delegates to the engine — it adds no
 behavior of its own. Power users can keep using ``load_world`` directly.
+
+Templates may be passed as a dict, a ``WorldTemplate``, or a str/Path to
+a JSON file — ``simulate()`` and ``Kernel.load`` accept all three.
 """
 from __future__ import annotations
 
+import json
+import os
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 
 if TYPE_CHECKING:
@@ -49,6 +64,42 @@ DecisionFn = Callable[[str, Dict[str, Any], List[str]], Optional[ActionInstance]
 # Real-time event stream callback: called with each event dict as it is
 # emitted (same payloads that accumulate in ``World.events``).
 OnEventFn = Callable[[Dict[str, Any]], None]
+
+# A template argument anywhere in the SDK: a raw dict, a pre-validated
+# WorldTemplate, or a str/Path to a JSON file on disk.
+TemplateLike = Union[Dict[str, Any], "WorldTemplate", str, "os.PathLike[str]"]
+
+
+def _coerce_template(template: TemplateLike) -> Union[Dict[str, Any], "WorldTemplate"]:
+    """Normalize a template argument to a dict/WorldTemplate.
+
+    str/Path inputs are treated as a path to a JSON file and loaded,
+    with friendly errors for missing files and invalid JSON.
+    """
+    if isinstance(template, (str, os.PathLike)):
+        path = Path(template)
+        if not path.exists():
+            raise FileNotFoundError(
+                f"Template file not found: {path} — pass a dict, a WorldTemplate, "
+                f"or a path to an existing JSON template file."
+            )
+        try:
+            text = path.read_text()
+        except OSError as exc:
+            raise OSError(f"Could not read template file {path}: {exc}") from exc
+        try:
+            loaded = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"Template file {path} is not valid JSON: {exc}"
+            ) from exc
+        if not isinstance(loaded, dict):
+            raise ValueError(
+                f"Template file {path} must contain a JSON object at the top "
+                f"level, got {type(loaded).__name__}."
+            )
+        return loaded
+    return template
 
 
 class World:
@@ -94,6 +145,36 @@ class World:
         """The seed this run uses (readable even for unseeded runs)."""
         return self.engine.seed
 
+    @property
+    def name(self) -> str:
+        """The template's world name ('' when the template omits it)."""
+        brief = getattr(self._state, "_world_brief", None) or {}
+        return str(brief.get("name") or "")
+
+    # -- readable results ---------------------------------------------------
+
+    def summary(self) -> str:
+        """A small human-readable wrap-up of the run so far."""
+        name = self.name or "world"
+        status = "finished" if self.finished else "running"
+        lines = [
+            f"{name}: {status} after {self.current_round} round(s) "
+            f"(budget {self.engine.max_rounds}).",
+            f"Terminated by: {self.terminated_by or ('round budget' if self.finished else '—')}",
+        ]
+        events = self.events
+        if events:
+            lines.append(f"Final event:   {events[-1].narrative}")
+        return "\n".join(lines)
+
+    def __repr__(self) -> str:
+        status = "finished" if self.finished else "running"
+        return (
+            f"<World {self.name or 'world'!r}: round "
+            f"{self.current_round}/{self.engine.max_rounds}, {status}, "
+            f"terminated_by={self.terminated_by!r}>"
+        )
+
     # -- execution ----------------------------------------------------------
 
     def step(self) -> WorldState:
@@ -138,15 +219,15 @@ class Kernel:
 
     def load(
         self,
-        template: Union[Dict[str, Any], "WorldTemplate"],
+        template: TemplateLike,
         *,
         decision_fn: Optional[DecisionFn] = None,
         on_event: Optional[OnEventFn] = None,
         seed: Optional[int] = None,
         max_rounds: Optional[int] = None,
     ) -> World:
-        """Build a runnable ``World`` from a template dict (or a
-        pre-validated ``WorldTemplate``).
+        """Build a runnable ``World`` from a template dict, a
+        pre-validated ``WorldTemplate``, or a str/Path to a JSON file.
 
         The loader honors the template's ``temporal.max_rounds``; an
         explicit ``max_rounds`` argument overrides it.
@@ -154,7 +235,7 @@ class Kernel:
         from .pipeline.loader import load_world
 
         state, engine = load_world(
-            template,
+            _coerce_template(template),
             seed=self.seed if seed is None else seed,
             decision_fn=decision_fn,
             on_event=on_event,
@@ -163,3 +244,48 @@ class Kernel:
         if max_rounds is not None:
             engine.max_rounds = int(max_rounds)
         return World(state, engine)
+
+
+def simulate(
+    template: TemplateLike,
+    *,
+    agent: Optional[DecisionFn] = None,
+    seed: Optional[int] = None,
+    max_rounds: Optional[int] = None,
+    on_event: Optional[OnEventFn] = None,
+    registry: Optional[KernelRegistry] = None,
+) -> World:
+    """One-shot simulation: load a template, run to completion, return
+    the finished ``World``.
+
+        from fg_env_kernel import simulate
+
+        world = simulate(template)
+        print(world.summary())
+
+    Args:
+        template:   template dict, ``WorldTemplate``, or str/Path to a
+                    JSON template file.
+        agent:      ``decision_fn(entity_id, perception, valid_actions)``
+                    called for every agent turn. Defaults to the built-in
+                    seeded random-valid-action policy (``random_policy``)
+                    — deterministic given ``seed``, never touches global
+                    random state.
+        seed:       RNG seed for the run (engine + default agent).
+                    Defaults to 0.
+        max_rounds: overrides the template's ``temporal.max_rounds``.
+        on_event:   callback receiving each event as it is emitted.
+        registry:   ``KernelRegistry`` scoping custom primitives;
+                    defaults to the process-global registry.
+    """
+    from .policies import random_policy
+
+    effective_seed = 0 if seed is None else seed
+    kernel = Kernel(seed=effective_seed, registry=registry)
+    world = kernel.load(template, on_event=on_event, max_rounds=max_rounds)
+    world.engine.decision_fn = (
+        agent if agent is not None
+        else random_policy(seed=effective_seed, state=world.state)
+    )
+    world.run()
+    return world

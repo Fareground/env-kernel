@@ -1,6 +1,13 @@
 """Fareground env kernel — the game-agnostic simulation engine.
 
-Quickstart (see ``examples/quickstart.py``):
+One line (see ``examples/00_simulate.py``):
+
+    from fg_env_kernel import simulate
+
+    world = simulate(template)     # dict, WorldTemplate, or path to JSON
+    print(world.summary())
+
+Full control (see ``examples/quickstart.py``):
 
     from fg_env_kernel import Kernel
 
@@ -109,7 +116,8 @@ from .action import ActionInstance
 from .event import SimEvent
 from .state import WorldState
 from .runtime.engine import SimulationEngine
-from .kernel import DecisionFn, Kernel, OnEventFn, World
+from .kernel import DecisionFn, Kernel, OnEventFn, World, simulate
+from .policies import random_policy
 from .physics import (
     PhysicsModel,
     PhysicsVariable,
@@ -174,6 +182,8 @@ __all__ = [
     "target_selector",
     "EffectContext",
     # SDK facade + agent contract
+    "simulate",
+    "random_policy",
     "Kernel",
     "World",
     "DecisionFn",

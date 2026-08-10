@@ -44,6 +44,19 @@ Importing the package never scans the filesystem. Drop-in primitive discovery (`
 
 ## Quickstart
 
+One line — the built-in seeded random agent plays every turn:
+
+```python
+from fg_env_kernel import simulate
+
+world = simulate("path/to/template.json")   # or a template dict
+print(world.summary())
+```
+
+`simulate(template, *, agent=None, seed=None, max_rounds=None, on_event=None, registry=None)` loads the template (dict, `WorldTemplate`, or path to a JSON file), runs to completion, and returns the finished `World`. With no `agent`, a deterministic random-valid-action policy (`random_policy`) drives every turn — same seed, same run. Pass your own `decision_fn` as `agent` to plug in an LLM.
+
+### Bring your own agent
+
 A world is a plain dict; an agent is a plain function. This is a complete, runnable program:
 
 ```python
@@ -102,7 +115,9 @@ Same seed, same template, same `decision_fn` → same run, every time. More in [
 
 The engine is fully decoupled from the LLM — the same world runs with real agents, cheap heuristics, or a deterministic test stub.
 
-`Kernel(seed=..., registry=...)` holds run configuration; `Kernel.load(template, decision_fn=..., on_event=..., seed=..., max_rounds=...)` returns a `World` with `run()`, `step()`, `finished`, `terminated_by`, `current_round`, `events`, `state`, and `seed`. An `on_event` callback streams each event as it is emitted.
+`Kernel(seed=..., registry=...)` holds run configuration; `Kernel.load(template, decision_fn=..., on_event=..., seed=..., max_rounds=...)` accepts a template dict, `WorldTemplate`, or path to a JSON file, and returns a `World` with `run()`, `step()`, `finished`, `terminated_by`, `current_round`, `events`, `state`, `seed`, and a readable `summary()`. An `on_event` callback streams each event as it is emitted.
+
+The ladder: `simulate()` for one-shot runs → `Kernel`/`World` for stepwise control → `load_world` for the raw engine.
 
 ### Going lower level
 

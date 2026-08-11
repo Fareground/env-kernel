@@ -11,6 +11,7 @@
 
 <p>
   <a href="https://github.com/Fareground/env-kernel/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/Fareground/env-kernel/ci.yml?branch=main&style=flat-square&label=CI" /></a>
+  <a href="https://pypi.org/project/fg-env-kernel/"><img alt="PyPI" src="https://img.shields.io/pypi/v/fg-env-kernel?style=flat-square" /></a>
   <img alt="Python" src="https://img.shields.io/badge/python-3.11+-3b82f6?style=flat-square" />
   <img alt="Dependencies" src="https://img.shields.io/badge/deps-pydantic%20only-2dd4a7?style=flat-square" />
   <img alt="Engine" src="https://img.shields.io/badge/engine-deterministic-9b59b6?style=flat-square" />
@@ -34,10 +35,8 @@ Between agent turns the world does not have to sit still: an event-driven clock 
 
 > **Note:** the distribution name is **`fg-env-kernel`** and the import package is **`fg_env_kernel`**. These are unchanged — downstream projects depend on them, and renaming them would break those imports.
 
-The package is not on PyPI — install from GitHub:
-
 ```bash
-pip install "fg-env-kernel @ git+https://github.com/Fareground/env-kernel.git"
+pip install fg-env-kernel
 ```
 
 Importing the package never scans the filesystem. Drop-in primitive discovery (`kernel_primitives/*.py`) is opt-in: call `fg_env_kernel.discover()` explicitly, or set the `KERNEL_PRIMITIVES_DIR` environment variable — an explicitly configured directory is honored at import time.

@@ -116,15 +116,16 @@ class _LintCtx:
 
 
 def _check_entity_types_have_agent(ctx: _LintCtx, issues: List[CompileIssue]) -> None:
-    """At least one entity_type with role='agent' must exist — otherwise
-    nobody can take actions and the game can't progress."""
+    """A world needs decision agents or a declared autonomous mechanism."""
     has_agent = any(role == "agent" for role in ctx.entity_type_roles.values())
-    if not has_agent:
+    autonomous = any(ctx.data.get(key) for key in (
+        'physics', 'property_dynamics', 'derived_rules', 'triggers', 'domain_modules'))
+    if not has_agent and not autonomous:
         issues.append(CompileIssue(
             severity="error",
             path="entity_types",
-            message="no entity_type has role='agent' — no one will take actions",
-            hint="Add at least one entity_type with role: 'agent'.",
+            message="no entity_type has role='agent' and no autonomous dynamics are declared",
+            hint="Declare the scenario's autonomous dynamics/world rules, or add a decision participant with role: 'agent'.",
         ))
 
 

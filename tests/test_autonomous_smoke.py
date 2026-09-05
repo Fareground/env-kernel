@@ -4,11 +4,12 @@ import math
 import pytest
 
 from fg_env_kernel.pipeline.loader import load_world
+from fg_env_kernel.pipeline.compile import compile_template
 from fg_env_kernel.pipeline.smoke import smoke_test
 
 
 def test_autonomous_physics_is_healthy_without_decisions():
-    state, engine = load_world({
+    compiled = compile_template({
         'name': 'Cooling room',
         'entity_types': [{'name': 'Room', 'role': 'object', 'properties': [
             {'name': 'temperature', 'type': 'float', 'default': 30}]}],
@@ -18,6 +19,8 @@ def test_autonomous_physics_is_healthy_without_decisions():
                 'rate': '-cooling_rate * (temperature - ambient)',
                 'writeback': {'entity_type': 'Room', 'property': 'temperature'}}]},
     })
+    assert compiled.ok, compiled.errors
+    state, engine = compiled.state, compiled.engine
     report = smoke_test(engine, rounds=3)
     assert report.healthy
     assert report.completed

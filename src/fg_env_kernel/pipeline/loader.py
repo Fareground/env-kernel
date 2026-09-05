@@ -243,7 +243,7 @@ class WorldTemplate(BaseModel):
     initial_skills: List[Dict[str, Any]] = Field(default_factory=list)
     recipes: List[Dict[str, Any]] = Field(default_factory=list)
     connectors: List[Dict[str, Any]] = Field(default_factory=list)
-    runtime_parameters: List[Dict[str, Any]] = Field(default_factory=list)
+    runtime_parameters: Union[List[Dict[str, Any]], Dict[str, Any]] = Field(default_factory=list)
     last_runtime_params: Dict[str, Any] = Field(default_factory=dict)
 
     # Subsystem toggles (config only — actual subsystems wire up when enabled)
@@ -429,11 +429,15 @@ def _apply_tables_and_runtime(state: WorldState, schema: Dict[str, Any]) -> None
     tables_raw = schema.get("tables") or {}
     if isinstance(tables_raw, dict):
         state.tables = dict(tables_raw)
-    runtime_table: Dict[str, Any] = {}
-    for rp in schema.get("runtime_parameters") or []:
-        name = rp.get("name")
-        if name and "default" in rp:
-            runtime_table[str(name)] = rp["default"]
+    raw_runtime = schema.get("runtime_parameters") or []
+    runtime_table: Dict[str, Any] = dict(raw_runtime) if isinstance(raw_runtime, dict) else {}
+    if isinstance(raw_runtime, list):
+        for rp in raw_runtime:
+            if not isinstance(rp, dict):
+                continue
+            name = rp.get("name")
+            if name and "default" in rp:
+                runtime_table[str(name)] = rp["default"]
     runtime_snap = schema.get("last_runtime_params") or {}
     if isinstance(runtime_snap, dict):
         for k, v in runtime_snap.items():

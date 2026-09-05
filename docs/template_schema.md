@@ -262,3 +262,20 @@ Available names (chess, poker, monopoly, mafia, prediction_market, securities_tr
 - `adjacency` — `{location, neighbors}` edges when not using a graph space.
 - `location_definitions` — per-location properties, entry requirements, modifiers, and tick effects.
 - `goals`, `skill_definitions` + `initial_skills`, `recipes` (crafting), `connectors` — optional subsystems; see their modules under `src/fg_env_kernel/`.
+
+### Action input validation
+
+Declared action parameters are validated before messages or state changes are
+applied. A missing `required` parameter without an explicit default rejects the
+whole action. Invalid numbers (including NaN/infinity), invalid declared types
+and values outside declared enum choices also reject it. Numeric strings may be
+coerced, numeric bounds clamp values, and explicit defaults are validated through
+the same contract. The event log records `action_failed` with
+`reason: "invalid_parameters"` and field errors; valid corrections emit
+`action_corrected`.
+
+Built-in `smoke_test` strategies use seeded sample values and typed targets to
+exercise parameterized mechanics. These samples test structure; they are not
+participant judgments. A callable `decisions` argument is used unchanged, so it
+can test specific valid or invalid inputs. Integrations implementing a baseline
+policy can reuse `fg_env_kernel.policies.sample_action_parameter`.

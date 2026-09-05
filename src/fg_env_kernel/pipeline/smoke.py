@@ -59,15 +59,16 @@ class SmokeReport:
     duration_ms: float = 0.0
     seed: int = 0
     warnings: List[str] = field(default_factory=list)
+    actions_expected: bool = True   # false for autonomous worlds without a decision cast
 
     @property
     def healthy(self) -> bool:
-        """A 'healthy' run: no crash, ran ≥1 round, ≥1 action taken,
-        terminated by a condition (not max_rounds timeout) — unless
-        max_rounds was the explicit goal."""
+        """Ran at least one round without crashing, and exercised actions
+        when the world declares actions or starts with decision agents.
+        Autonomous dynamics do not need invented agent decisions."""
         if self.crash:
             return False
-        if self.rounds_run == 0 or not self.actions_taken:
+        if self.rounds_run == 0 or (self.actions_expected and not self.actions_taken):
             return False
         return True
 
@@ -152,6 +153,7 @@ def smoke_test(
     """
     state = engine.state
     declared_actions = sorted(state.action_definitions.keys())
+    actions_expected = bool(declared_actions or state.get_agent_entities())
     rng = random.Random(seed)
 
     # Set up the decision function
@@ -239,7 +241,7 @@ def smoke_test(
     )
 
     warnings: List[str] = []
-    if not actions_taken and not crash:
+    if actions_expected and not actions_taken and not crash:
         warnings.append(
             "no actions were taken across the entire run — check that an agent-role "
             "entity exists with a valid action whose preconditions can be satisfied."
@@ -263,6 +265,7 @@ def smoke_test(
         duration_ms=round(elapsed_ms, 1),
         seed=seed,
         warnings=warnings,
+        actions_expected=actions_expected,
     )
 
 

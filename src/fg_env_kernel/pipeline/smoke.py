@@ -166,6 +166,29 @@ def smoke_test(
     else:
         decide_fn = _make_random_decider(rng)
 
+    if not callable(decisions):
+        # Generated inputs exercise mechanics in a smoke test; they are not
+        # participant judgments. A caller's explicit decision function is left
+        # intact so missing/invalid-input rejection can also be tested.
+        from ..policies import sample_action_parameter
+        choose = decide_fn
+
+        def decide_fn(entity_id, perception, valid_actions):
+            action = choose(entity_id, perception, valid_actions)
+            if action is None:
+                return None
+            definition = state.action_definitions.get(action.action_name)
+            if definition is None:
+                return action
+            action.parameters = {decl["name"]: sample_action_parameter(decl, rng)
+                                 for decl in definition.parameters if decl.get("name")}
+            if definition.target_type:
+                targets = [entity.id for entity in state.entities.values()
+                           if entity.alive and entity.id != entity_id
+                           and entity.entity_type == definition.target_type]
+                action.target_id = rng.choice(sorted(targets)) if targets else None
+            return action
+
     # Capture metrics via on_event
     actions_taken: Dict[str, int] = defaultdict(int)
     events_count = [0]

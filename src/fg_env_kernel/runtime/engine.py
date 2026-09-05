@@ -1065,7 +1065,7 @@ class SimulationEngine:
         from .actions import _resolve_action_def
         return _resolve_action_def(self, entity, action_instance)
 
-    def _coerce_action_params(self, entity, action_def, action_instance) -> None:
+    def _coerce_action_params(self, entity, action_def, action_instance) -> bool:
         """Canonical implementation in ``runtime/actions.py``."""
         from .actions import _coerce_action_params
         return _coerce_action_params(self, entity, action_def, action_instance)

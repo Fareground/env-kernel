@@ -97,3 +97,30 @@ def random_policy(seed: int = 0, state: Optional["WorldState"] = None):
         return ActionInstance(action_name=name, actor_id=entity_id, target_id=target_id)
 
     return decision_fn
+
+
+def sample_action_parameter(declaration: Dict[str, Any], rng: random.Random) -> Any:
+    """Deterministic structural-test input, with authored defaults taking priority."""
+    import copy
+    if declaration.get("default") is not None:
+        return copy.deepcopy(declaration["default"])
+    choices = declaration.get("enum_values") or declaration.get("enum")
+    if choices:
+        return copy.deepcopy(rng.choice(choices))
+    kind = str(declaration.get("type") or "string").lower()
+    if kind in ("int", "integer", "float", "number"):
+        low = declaration.get("min", declaration.get("min_value"))
+        high = declaration.get("max", declaration.get("max_value"))
+        low = float(low) if low is not None else min(0.0, float(high)) if high is not None else 0.0
+        high = float(high) if high is not None else max(10.0, low)
+        if kind in ("int", "integer"):
+            import math
+            return rng.randint(math.ceil(low), math.floor(high))
+        return rng.uniform(low, high)
+    if kind in ("bool", "boolean"):
+        return bool(rng.getrandbits(1))
+    if kind in ("list", "array"):
+        return []
+    if kind in ("dict", "object"):
+        return {}
+    return "Baseline test input"

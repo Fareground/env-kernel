@@ -10,7 +10,8 @@ methods are now 1-line delegations into this module.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+import math
+from typing import TYPE_CHECKING
 
 from ..action import ActionInstance
 from ..messaging import Message
@@ -39,8 +40,7 @@ def _resolve_action_def(engine, entity, action_instance: "ActionInstance"):
     action_name = action_instance.action_name
     action_def = engine.state.action_definitions.get(action_name)
     if action_def is not None:
-        engine._coerce_action_params(entity, action_def, action_instance)
-        return action_def
+        return action_def if engine._coerce_action_params(entity, action_def, action_instance) else None
 
     from difflib import get_close_matches
     valid = list(engine.state.action_definitions.keys())
@@ -68,8 +68,7 @@ def _resolve_action_def(engine, entity, action_instance: "ActionInstance"):
         )
         action_instance.action_name = fallback
         corrected = engine.state.action_definitions[fallback]
-        engine._coerce_action_params(entity, corrected, action_instance)
-        return corrected
+        return corrected if engine._coerce_action_params(entity, corrected, action_instance) else None
 
     engine._emit_event(
         "action_failed",
@@ -86,75 +85,94 @@ def _resolve_action_def(engine, entity, action_instance: "ActionInstance"):
     )
     return None
 
-def _coerce_action_params(engine, entity, action_def, action_instance) -> None:
-    """Enforce declared parameter types and bounds on submitted values.
+def _parameter_value(decl, value):
+    """Normalize a supplied/default value; invalid data never reaches effects."""
+    ptype = str(decl.get("type") or "").lower()
+    lo = decl.get("min", decl.get("min_value"))
+    hi = decl.get("max", decl.get("max_value"))
+    if ptype in ("int", "integer", "float", "number") or lo is not None or hi is not None:
+        if isinstance(value, bool):
+            raise ValueError("must be a finite number")
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError("must be a finite number") from None
+        if not math.isfinite(number):
+            raise ValueError("must be a finite number")
+        if lo is not None:
+            number = max(float(lo), number)
+        if hi is not None:
+            number = min(float(hi), number)
+        value = int(round(number)) if ptype in ("int", "integer") else number
+    elif ptype in ("string", "str", "enum") and not isinstance(value, str):
+        raise ValueError("must be text")
+    elif ptype in ("bool", "boolean") and not isinstance(value, bool):
+        raise ValueError("must be true or false")
+    elif ptype in ("list", "array") and not isinstance(value, list):
+        raise ValueError("must be a list")
+    elif ptype in ("dict", "object") and not isinstance(value, dict):
+        raise ValueError("must be an object")
+    allowed = decl.get("enum_values", decl.get("enum"))
+    if allowed and value not in allowed:
+        raise ValueError("must be one of the declared choices")
+    return value
 
-    Declared ``parameters`` on an ActionDefinition were previously
-    prompt decoration only — an out-of-range or wrong-typed LLM value
-    flowed raw into resolution and effects. Coerce numerics to their
-    declared type, clamp to [min, max], and fill a missing value from
-    the declaration's default. Every correction is announced with an
-    ``action_corrected`` event so the transcript stays honest.
+
+def _coerce_action_params(engine, entity, action_def, action_instance) -> bool:
+    """Validate the whole input contract before broadcasting or applying effects.
+
+    Preserve numeric coercion, clamping and explicit defaults. Missing required
+    inputs and values that cannot satisfy their type fail the action atomically.
     """
-    if not action_def.parameters:
-        return
     submitted = action_instance.parameters or {}
-    fixes: dict[str, Any] = {}
+    if not isinstance(submitted, dict):
+        errors = {"parameters": "must be an object"}
+        submitted = {}
+    else:
+        errors = {}
+    merged = dict(submitted)
+    changed = {}
     for decl in action_def.parameters:
         if not isinstance(decl, dict) or not decl.get("name"):
             continue
         name = str(decl["name"])
-        ptype = str(decl.get("type") or "").lower()
-        lo, hi = decl.get("min"), decl.get("max")
-        if lo is None:
-            lo = decl.get("min_value")
-        if hi is None:
-            hi = decl.get("max_value")
         value = submitted.get(name)
         if value is None:
-            if decl.get("default") is not None:
-                fixes[name] = decl["default"]
-            continue
-        if ptype in ("int", "float", "number") or lo is not None or hi is not None:
-            try:
-                num = float(value)
-            except (TypeError, ValueError):
-                if decl.get("default") is not None:
-                    fixes[name] = decl["default"]
+            value = decl.get("default")
+            if value is None:
+                if decl.get("required"):
+                    errors[name] = "is required"
                 continue
-            clamped = num
-            if lo is not None:
-                clamped = max(float(lo), clamped)
-            if hi is not None:
-                clamped = min(float(hi), clamped)
-            if ptype == "int":
-                clamped = int(round(clamped))
-            out = clamped
-            if out != value or type(out) is not type(value):
-                fixes[name] = out
-    if not fixes:
-        return
-    merged = dict(submitted)
-    changed = {
-        k: {"submitted": submitted.get(k), "coerced": v}
-        for k, v in fixes.items() if submitted.get(k) != v
-    }
-    merged.update(fixes)
+        try:
+            normalized = _parameter_value(decl, value)
+        except ValueError as exc:
+            if decl.get("default") is None:
+                errors[name] = str(exc)
+                continue
+            try:
+                normalized = _parameter_value(decl, decl["default"])
+            except ValueError as default_error:
+                errors[name] = str(default_error)
+                continue
+        merged[name] = normalized
+        if normalized != submitted.get(name) or type(normalized) is not type(submitted.get(name)):
+            changed[name] = {"submitted": submitted.get(name), "coerced": normalized}
+    if errors:
+        engine._emit_event("action_failed", actor_id=entity.id,
+            action_name=action_instance.action_name,
+            data={"reason": "invalid_parameters", "details": errors},
+            narrative=f"{entity.name}'s action needs valid inputs: " + "; ".join(f"{key} {error}" for key, error in errors.items()))
+        return False
     action_instance.parameters = merged
     if changed:
-        engine._emit_event(
-            "action_corrected",
-            actor_id=entity.id,
+        # A sealed action's values belong to its actor, even when corrected.
+        details = {} if _action_suppresses_chat(engine.state, action_instance.action_name) else changed
+        engine._emit_event("action_corrected", actor_id=entity.id,
             action_name=action_instance.action_name,
-            data={"reason": "parameter_coerced", "details": changed},
-            narrative=(
-                f"{entity.name}'s '{action_instance.action_name}' "
-                f"parameters were coerced to their declared bounds: "
-                + ", ".join(
-                    f"{k}: {v['submitted']!r} → {v['coerced']!r}"
-                    for k, v in changed.items())
-            ),
-        )
+            data={"reason": "parameter_coerced", "details": details},
+            narrative=f"{entity.name}'s action inputs were adjusted to their declared defaults or bounds.")
+    return True
+
 
 def _resolve_and_apply(engine, entity_id: str, action_instance: ActionInstance):
     """Resolve an action and apply its effects to the world state."""

@@ -811,6 +811,9 @@ class SimulationEngine:
                     data={"handler": phase.handler, "error": str(e)},
                     narrative=f"Phase handler error: {e}",
                 )
+                # These handlers execute the environment's rules. Continuing
+                # would turn a failed update into a fabricated successful run.
+                raise RuntimeError(f"Phase handler {phase.handler!r} failed: {e}") from e
 
         agents = self.state.get_agent_entities()
 

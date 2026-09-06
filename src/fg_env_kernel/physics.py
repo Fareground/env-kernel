@@ -306,6 +306,11 @@ class PhysicsModel:
                     f"variable {name!r} has both a rate and a source — a source is "
                     "read-only (algebraic); drop one."
                 )
+            for label, value in (("value", v.value), ("min", v.min), ("max", v.max)):
+                if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)):
+                    raise PhysicsExprError(f"variable {name!r} {label} must be finite")
+            if v.source is None and ((v.min is not None and v.value < v.min) or (v.max is not None and v.value > v.max)):
+                raise PhysicsExprError(f"variable {name!r} initial value {v.value} is outside its bounds ({v.min}, {v.max})")
             if v.min is not None and v.max is not None and v.min > v.max:
                 raise PhysicsExprError(
                     f"variable {name!r} has min ({v.min}) > max ({v.max})"

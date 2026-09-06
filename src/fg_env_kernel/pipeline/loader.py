@@ -39,7 +39,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 if TYPE_CHECKING:
     from ..continuous_time import ContinuousTemporalModel
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ..action import (
     ActionDefinition,
@@ -48,6 +48,7 @@ from ..action import (
     EffectOperation,
     Operator,
     Precondition,
+    validate_numeric_precondition,
 )
 from ..engine import SimulationEngine, TerminationCondition
 from ..entity import Entity, EntityType
@@ -111,6 +112,11 @@ class PreconditionSpec(BaseModel):
     resource: Optional[str] = None
     relation_type: Optional[str] = None
     description: str = ""
+
+    @model_validator(mode="after")
+    def validate_bound(self):
+        validate_numeric_precondition(self.operator, self.value, self.expr)
+        return self
 
 
 class EffectConditionSpec(BaseModel):

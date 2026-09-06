@@ -351,11 +351,13 @@ class SimulationEngine:
         self._running = True
         self._paused = False
 
-        # Check if continuous time model is configured
-        if self._continuous_time is not None:
-            return self._run_continuous()
-
-        return self._run_discrete()
+        try:
+            if self._continuous_time is not None:
+                return self._run_continuous()
+            return self._run_discrete()
+        except BaseException:
+            self._running = False
+            raise
 
     def _run_discrete(self) -> WorldState:
         """Run the simulation in discrete (turn-based) mode.
@@ -892,10 +894,13 @@ class SimulationEngine:
                 self._run_agent_turn(task["entity_id"])
 
         def _collect(task):
+            if not self._running:
+                return
             eid = task["entity_id"]
             try:
                 action = self.decision_fn(eid, task["perception"], task["valid_actions"]) if self.decision_fn else None
             except Exception as e:
+                self._running = False
                 logger.error(f"Simultaneous-phase decision failed for {eid}: {e}")
                 with sub_lock:
                     self._emit_event(
@@ -904,7 +909,7 @@ class SimulationEngine:
                         data={"error": str(e)},
                         narrative=f"Decision error for {eid}: {e}",
                     )
-                return
+                raise
             if action is not None:
                 with sub_lock:
                     submissions[eid] = action
@@ -926,6 +931,9 @@ class SimulationEngine:
                     f.result()
                 except Exception as e:
                     logger.error(f"Simultaneous task error: {e}")
+                    for pending in futures:
+                        pending.cancel()
+                    raise
 
         # Step 3: reveal — apply submissions in turn_order, serially.
         # All agents committed against the same perception; resolution
@@ -1013,10 +1021,13 @@ class SimulationEngine:
             sub_lock = threading.Lock()
 
             def _decide(task):
+                if not self._running:
+                    return
                 eid = task["entity_id"]
                 try:
                     action = self.decision_fn(eid, task["perception"], task["valid_actions"]) if self.decision_fn else None
                 except Exception as e:
+                    self._running = False
                     logger.error(f"Parallel decision failed for {eid}: {e}")
                     # Surface the failure in the event log so the UI /
                     # transcript shows that an agent was unable to act,
@@ -1028,7 +1039,7 @@ class SimulationEngine:
                             data={"error": str(e)},
                             narrative=f"Decision error for {eid}: {e}",
                         )
-                    return
+                    raise
                 if action is not None:
                     with sub_lock:
                         submissions[eid] = action
@@ -1044,6 +1055,9 @@ class SimulationEngine:
                         future.result()
                     except Exception as e:
                         logger.error(f"Parallel agent turn error: {e}")
+                        for pending in futures:
+                            pending.cancel()
+                        raise
 
             # Resolve in deterministic batch order (live price updates still
             # happen here, just in a reproducible sequence).

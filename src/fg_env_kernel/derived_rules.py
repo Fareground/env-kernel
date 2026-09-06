@@ -91,6 +91,10 @@ class DerivedRulesEngine:
 
     def add_rule(self, spec: Dict[str, Any]) -> None:
         """Compile a JSON rule spec into a DerivedRule."""
+        from .pipeline.loader import _parse_effects
+        if not isinstance(spec.get('then'), list) or not spec['then']:
+            raise ValueError(f"Derived rule {spec.get('name', '')!r} needs a nonempty 'then' list of effects")
+        _parse_effects(spec['then'])  # Fail compilation, not a later swallowed tick.
         rule = DerivedRule(
             name=str(spec.get("name") or f"rule_{len(self._rules)}"),
             when=spec.get("when"),
@@ -180,6 +184,7 @@ class DerivedRulesEngine:
                         self._fired.add(bookkeep_key)
                 except Exception:
                     logger.exception("derived_rule '%s' fire failed", rule.name)
+                    raise
 
         return all_changes
 

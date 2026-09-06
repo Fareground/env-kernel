@@ -858,7 +858,7 @@ def _apply_property_dynamics(state: WorldState, spec: Dict[str, Any]) -> None:
     if not spec:
         return
     if not any(spec.get(k) for k in ("drift_rules", "spawn_rules", "cascade_rules")):
-        return
+        raise ValueError("property_dynamics needs drift_rules, spawn_rules or cascade_rules; no executable updates were defined")
     from ..property_dynamics import PropertyDynamicsEngine
 
     state.property_dynamics = PropertyDynamicsEngine.from_dict(spec)

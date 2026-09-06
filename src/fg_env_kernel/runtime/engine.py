@@ -724,9 +724,6 @@ class SimulationEngine:
                 if bp.action == "pause":
                     self._paused = True
 
-        if self.on_round_end:
-            self.on_round_end(round_num, self.state)
-
         # Derived rules — forward-chaining inference. Runs AFTER agent
         # turns and BEFORE termination check so newly-derived facts
         # (e.g. "hp <= 0 → alive = false") are visible to terminations.
@@ -743,6 +740,7 @@ class SimulationEngine:
                         )
             except Exception:
                 logger.exception("derived_rules tick failed")
+                raise
 
         # Check termination conditions
         triggered = self._check_termination()
@@ -778,6 +776,10 @@ class SimulationEngine:
                 if v.get("severity") == "error":
                     self._running = False
 
+        # Observers see the completed round, including autonomous rules and
+        # termination effects, so saved trajectories never lag by one day.
+        if self.on_round_end:
+            self.on_round_end(round_num, self.state)
         self._emit_event("round_end", narrative=f"Round {round_num} ends.")
 
     def _run_phase(self, phase):

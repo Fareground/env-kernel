@@ -626,7 +626,7 @@ def _check_unknown_spec_fields(ctx: _LintCtx, issues: List[CompileIssue]) -> Non
         "physics", "temporal", "spatial", "property_dynamics", "rules",
         "cognitive_config", "social_config", "crowd_config",
         "last_runtime_params", "personas", "agent_archetypes",
-        "scenario_type", "viz", "visualization", "tables",
+        "scenario_type", "viz", "visualization", "tables", "report_outputs",
     }
     for key in ctx.data:
         if key not in root_known:

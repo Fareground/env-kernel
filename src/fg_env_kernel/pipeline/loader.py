@@ -737,6 +737,13 @@ def _apply_entities(state: WorldState, specs: List[Dict[str, Any]]) -> None:
                 if pschema.default is not None:
                     props[pschema.name] = pschema.default
         props.update(ent.get("properties") or {})
+        if et is not None:
+            for pschema in et.properties:
+                if pschema.enum_values and not pschema.validate(props.get(pschema.name)):
+                    raise ValueError(
+                        f"Invalid initial value for {ent['id']}.{pschema.name}; "
+                        f"choose one of {pschema.enum_values}"
+                    )
         entity = Entity(
             id=ent["id"],
             name=ent.get("name", ent["id"]),

@@ -33,7 +33,9 @@ references them by name. The agent never emits Python.
 """
 from __future__ import annotations
 
+import copy
 import logging
+import math
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 if TYPE_CHECKING:
@@ -399,7 +401,7 @@ def load_world(
         seed=seed,
         decision_fn=decision_fn,
         on_event=on_event,
-        termination_conditions=_build_termination_conditions(schema),
+        termination_conditions=build_termination_conditions(schema, state),
         continuous_time=build_continuous_model(schema),
         registry=registry,
         **engine_kwargs,
@@ -434,7 +436,7 @@ def _apply_tables_and_runtime(state: WorldState, schema: Dict[str, Any]) -> None
     """Schema tables for $lookup + runtime_parameters as a layer."""
     tables_raw = schema.get("tables") or {}
     if isinstance(tables_raw, dict):
-        state.tables = dict(tables_raw)
+        state.tables = copy.deepcopy(tables_raw)
     raw_runtime = schema.get("runtime_parameters") or []
     runtime_table: Dict[str, Any] = dict(raw_runtime) if isinstance(raw_runtime, dict) else {}
     if isinstance(raw_runtime, list):
@@ -489,10 +491,16 @@ def _apply_physics(state: WorldState, spec: Dict[str, Any]) -> None:
     """Attach the continuous coupled-dynamics ("physics") system from the
     ``physics`` block, if present. No-op when absent or variable-less."""
     from ..physics import PhysicsModel
-    model = PhysicsModel.from_schema(spec)
+    # Initial bindings are evaluated once per fresh world, never written back
+    # into the reusable template. Differential equations remain dynamic.
+    resolved = {**spec, "params": _resolve_initial(spec.get("params") or {}, state, "physics.params"),
+                "variables": [{**v, "value": _resolve_initial(v.get("value", 0), state, f"physics.{v['name']}.value")}
+                              for v in spec.get("variables") or []]}
+    model = PhysicsModel.from_schema(resolved)
     if model is not None:
         state.physics = model
         state.modules["physics"] = model
+        model.integrate(0, state=state)
 
 
 def build_continuous_model(schema: Dict[str, Any]) -> Optional["ContinuousTemporalModel"]:
@@ -730,6 +738,37 @@ def _parse_effects(
     return out
 
 
+def _has_initial_lookup(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().startswith("$lookup(")
+    if isinstance(value, dict):
+        return any(_has_initial_lookup(v) for v in value.values())
+    if isinstance(value, list):
+        return any(_has_initial_lookup(v) for v in value)
+    return False
+
+
+def _resolve_initial(value: Any, state: WorldState, path: str) -> Any:
+    """Resolve explicit table lookups in initial fields with the kernel grammar.
+
+    Action expressions remain dynamic. Prose and ordinary strings are literals;
+    missing bindings fail construction instead of becoming text or zero inputs.
+    """
+    from ..effects import resolve_expression
+    if isinstance(value, dict):
+        return {k: _resolve_initial(v, state, f"{path}.{k}") for k, v in value.items()}
+    if isinstance(value, list):
+        return [_resolve_initial(v, state, f"{path}[{i}]") for i, v in enumerate(value)]
+    if isinstance(value, str) and _has_initial_lookup(value):
+        resolved = resolve_expression(value.strip(), state=state)
+        if resolved is None or _has_initial_lookup(resolved):
+            raise ValueError(f"Unresolved initial input at {path}: {value}; define the referenced runtime parameter or table key")
+        if isinstance(resolved, (float, int)) and not math.isfinite(resolved):
+            raise ValueError(f"Nonfinite initial input at {path}")
+        return resolved
+    return value
+
+
 def _apply_entities(state: WorldState, specs: List[Dict[str, Any]]) -> None:
     for ent in specs:
         # Merge EntityType defaults under explicit per-entity overrides.
@@ -743,6 +782,12 @@ def _apply_entities(state: WorldState, specs: List[Dict[str, Any]]) -> None:
                 if pschema.default is not None:
                     props[pschema.name] = pschema.default
         props.update(ent.get("properties") or {})
+        bound = {name for name, value in props.items() if _has_initial_lookup(value)}
+        props = _resolve_initial(props, state, ent["id"])
+        if et is not None:
+            for pschema in et.properties:
+                if pschema.name in bound and not pschema.validate(props.get(pschema.name)):
+                    raise ValueError(f"Invalid runtime input for {ent['id']}.{pschema.name}; check its type and bounds")
         if et is not None:
             for pschema in et.properties:
                 if pschema.enum_values and not pschema.validate(props.get(pschema.name)):
@@ -986,7 +1031,7 @@ def _apply_domain_modules(state: WorldState, specs: List[Dict[str, Any]]) -> Non
     mgr = state.domain_modules or DomainModuleManager()
     for spec in specs:
         logger.info("Creating domain module '%s' with params: %s", spec["name"], spec.get("params", {}))
-        module = registry.create(spec["name"], params=spec.get("params", {}))
+        module = registry.create(spec["name"], params=_resolve_initial(spec.get("params", {}), state, f"domain_modules.{spec['name']}.params"))
         if module is not None:
             mgr.add_module(module)
     state.domain_modules = mgr
@@ -1039,10 +1084,13 @@ def _apply_crowd(state: WorldState, config: Dict[str, Any]) -> None:
         }
 
 
-def _build_termination_conditions(schema: Dict[str, Any]) -> List[TerminationCondition]:
+def build_termination_conditions(schema: Dict[str, Any], state: Optional[WorldState] = None) -> List[TerminationCondition]:
+    if state is None:
+        state = WorldState()
+        _apply_tables_and_runtime(state, schema)
     out: List[TerminationCondition] = []
     for tc in schema.get("termination_conditions") or []:
-        out.append(_build_termination(tc))
+        out.append(_build_termination(_resolve_initial(tc, state, "termination_conditions")))
     return out
 
 
@@ -1058,6 +1106,7 @@ def _build_termination(spec: Dict[str, Any]) -> TerminationCondition:
 
 __all__ = [
     "WorldTemplate",
+    "build_termination_conditions",
     "EntityTypeSpec",
     "ResourceTypeSpec",
     "ActionSpec",

@@ -1094,6 +1094,10 @@ def build_termination_conditions(schema: Dict[str, Any], state: Optional[WorldSt
     return out
 
 
+# Compatibility for existing integrations; new callers use the public name.
+_build_termination_conditions = build_termination_conditions
+
+
 def _build_termination(spec: Dict[str, Any]) -> TerminationCondition:
     return TerminationCondition(
         name=spec.get("name", ""),

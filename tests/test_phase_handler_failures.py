@@ -1,4 +1,3 @@
-import pytest
 from fg_env_kernel.pipeline.compile import compile_template
 from fg_env_kernel.pipeline.loader import load_world
 from fg_env_kernel.pipeline.smoke import smoke_test

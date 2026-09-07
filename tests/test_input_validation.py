@@ -1,5 +1,4 @@
 import copy
-import math
 import pytest
 from fg_env_kernel import compile_template
 from fg_env_kernel.action import Precondition, Operator

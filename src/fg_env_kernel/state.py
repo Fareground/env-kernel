@@ -572,21 +572,15 @@ class WorldState:
             if pc.operator == Operator.IS_ALIVE:
                 if not actor.alive:
                     return False
-            elif pc.operator == Operator.GTE and pc.field:
-                val = actor.get(pc.field, 0)
-                if isinstance(val, (int, float)) and val < pc.value:
+            elif pc.operator in (Operator.GTE, Operator.GT, Operator.LTE, Operator.LT) and pc.field:
+                import math
+                val = actor.get(pc.field)
+                if isinstance(val, bool) or not isinstance(val, (int, float)) or not math.isfinite(val):
                     return False
-            elif pc.operator == Operator.LTE and pc.field:
-                val = actor.get(pc.field, 0)
-                if isinstance(val, (int, float)) and val > pc.value:
-                    return False
-            elif pc.operator == Operator.GT and pc.field:
-                val = actor.get(pc.field, 0)
-                if isinstance(val, (int, float)) and val <= pc.value:
-                    return False
-            elif pc.operator == Operator.LT and pc.field:
-                val = actor.get(pc.field, 0)
-                if isinstance(val, (int, float)) and val >= pc.value:
+                if ((pc.operator == Operator.GTE and val < pc.value)
+                    or (pc.operator == Operator.GT and val <= pc.value)
+                    or (pc.operator == Operator.LTE and val > pc.value)
+                    or (pc.operator == Operator.LT and val >= pc.value)):
                     return False
             elif pc.operator == Operator.EQ and pc.field:
                 if actor.get(pc.field) != pc.value:

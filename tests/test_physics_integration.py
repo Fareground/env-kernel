@@ -18,7 +18,7 @@ def _idle_decision(entity_id, perception, valid_actions):
     """Agents do nothing — isolates the autonomous world dynamics."""
     if valid_actions:
         a = valid_actions[0]
-        name = a.name if hasattr(a, "name") else a.get("name")
+        name = a if isinstance(a, str) else a.name if hasattr(a, "name") else a.get("name")
         return ActionInstance(action_name=name, actor_id=entity_id)
     return None
 

@@ -1,6 +1,7 @@
 """Action definitions, preconditions, and effects."""
 from dataclasses import dataclass, field
 from enum import Enum
+import math
 from typing import Any, Dict, List, Optional
 
 
@@ -27,6 +28,14 @@ class Operator(Enum):
     HAS_RECIPE = "has_recipe"
 
 
+def validate_numeric_precondition(operator: str, value: Any, expr: Any = None) -> None:
+    if not expr and operator in {"gt", "gte", "lt", "lte", "has_resource", "skill_gte", "relation_gte"}:
+        if value is None and operator in {"has_resource", "skill_gte", "relation_gte"}:
+            return
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            raise ValueError(f"{operator} requires a finite numeric value; put dynamic comparisons in expr (for example, '$actor.price >= $actor.reservation_price').")
+
+
 @dataclass
 class Precondition:
     """A single precondition check.
@@ -51,6 +60,9 @@ class Precondition:
     # New: full expression form. String ("$actor.gold >= 100") or dict.
     # Takes precedence when truthy.
     expr: Any = None
+
+    def __post_init__(self):
+        validate_numeric_precondition(self.operator.value, self.value, self.expr)
 
 
 class EffectOperation(Enum):

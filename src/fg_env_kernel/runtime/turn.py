@@ -276,6 +276,7 @@ def run_agent_turn(engine, entity_id: str):
         try:
             action_instance = engine.decision_fn(entity_id, perception, valid_actions)
         except Exception as e:
+            engine._running = False
             logger.error(f"Sequential decision failed for {entity_id}: {e}")
             engine._emit_event(
                 "decision_error",
@@ -283,7 +284,7 @@ def run_agent_turn(engine, entity_id: str):
                 data={"error": str(e)},
                 narrative=f"Decision error for {entity_id}: {e}",
             )
-            action_instance = None
+            raise
     if action_instance is None:
         # If in a non-interruptible sequence, force continuation
         if active_seq:

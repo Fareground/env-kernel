@@ -57,6 +57,7 @@ def lint_template(template: Any, *, registry: Any = None) -> List[CompileIssue]:
     _check_resource_holdings_reference_known_entities(ctx, issues)
     _check_initial_relations_reference_known_entities(ctx, issues)
     _check_domain_modules_registered(ctx, issues)
+    _check_phase_handlers_registered(ctx, issues)
     _check_factions_reference_known_entities(ctx, issues)
     _check_termination_check_types_registered(ctx, issues)
     # Newer checks — catch the failure modes a real env-builder agent hit
@@ -626,7 +627,7 @@ def _check_unknown_spec_fields(ctx: _LintCtx, issues: List[CompileIssue]) -> Non
         "physics", "temporal", "spatial", "property_dynamics", "rules",
         "cognitive_config", "social_config", "crowd_config",
         "last_runtime_params", "personas", "agent_archetypes",
-        "scenario_type", "viz", "visualization", "tables",
+        "scenario_type", "viz", "visualization", "tables", "report_outputs",
     }
     for key in ctx.data:
         if key not in root_known:
@@ -696,3 +697,15 @@ def _check_unknown_spec_fields(ctx: _LintCtx, issues: List[CompileIssue]) -> Non
 
 
 __all__ = ["lint_template"]
+
+
+def _check_phase_handlers_registered(ctx: _LintCtx, issues: List[CompileIssue]) -> None:
+    from ..phase_handlers import PHASE_HANDLER_REGISTRY
+    for index, phase in enumerate((ctx.data.get("temporal") or {}).get("phases") or []):
+        handler = phase.get("handler")
+        if handler and handler not in PHASE_HANDLER_REGISTRY:
+            issues.append(CompileIssue(
+                severity="error", path=f"temporal.phases[{index}].handler",
+                message=f"Unknown phase handler: {handler!r}.",
+                hint="Use a registered handler, or express scenario updates with kernel rules and property dynamics. Available handlers: " + ", ".join(sorted(PHASE_HANDLER_REGISTRY)),
+            ))

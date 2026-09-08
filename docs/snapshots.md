@@ -26,7 +26,7 @@ parameters cannot be inferred: these legacy snapshots require starting a fresh
 run. Version 2 requires all top-level sections. Redacted spectator views are not
 restorable snapshots.
 
-World snapshots are not complete engine checkpoints. The engine’s own random
-stream, continuous-time queue, external event log, and agent/LLM state require a
-separate execution checkpoint. Persisted world snapshots contain private state
+World snapshots are not complete engine checkpoints. Use `engine.checkpoint()`
+and `execution_checkpoint=` when restoring the execution itself; see
+[execution checkpoints](checkpoints.md). Persisted snapshots contain private state
 and random-generator state; filter these from live spectator payloads.

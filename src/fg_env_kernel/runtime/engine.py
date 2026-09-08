@@ -209,6 +209,9 @@ class SimulationEngine:
         parallel_decisions: int = 0,
         emit_state_snapshots: bool = False,
         registry: Optional["KernelRegistry"] = None,
+        on_checkpoint: Optional[Callable] = None,
+        execution_checkpoint: Optional[dict] = None,
+        checkpoint_event_history: Optional[List[dict]] = None,
     ):
         self.state = state
         # Primitive registry this engine resolves custom effect ops and
@@ -230,6 +233,8 @@ class SimulationEngine:
         self.outcome_fn = outcome_fn      # fn(entity_id, action_name, success, narrative, details) -> None
         self.narrative_fn = narrative_fn   # fn(actor, target, action_def, action_instance, result, state_changes) -> str
         self.max_rounds = max_rounds
+        self._checkpoint_ready = True
+        self.on_checkpoint = on_checkpoint
         self._running = False
         self._paused = False
         self._stopped = False
@@ -270,7 +275,8 @@ class SimulationEngine:
         # kernel reads global random, and (b) clobber global state shared
         # by in-process batch/fork runs.
         if self.world_event_engine is not None:
-            self.world_event_engine.rng = self._rng
+            target = getattr(self.world_event_engine, "event_engine", self.world_event_engine)
+            target.rng = self._rng
         pd = getattr(self.state, "property_dynamics", None)
         if pd is not None:
             pd.rng = self._rng
@@ -278,20 +284,38 @@ class SimulationEngine:
         # `reseed(rng)` to pin their shuffles to the sim seed. Without this a
         # card game deals differently on every same-seed run.
         dm = getattr(self.state, "domain_modules", None)
-        if dm is not None:
+        if dm is not None and execution_checkpoint is None:
             for mod in getattr(dm, "_modules", {}).values():
                 reseed = getattr(mod, "reseed", None)
                 if callable(reseed):
                     reseed(self._rng)
+
+        if execution_checkpoint is not None:
+            self.restore_checkpoint(execution_checkpoint, event_history=checkpoint_event_history)
+
+    def checkpoint(self, *, external_state=None, include_events=True) -> dict:
+        """Capture execution state at a completed work-unit boundary."""
+        from ..checkpoint import capture
+        return capture(self, external_state=external_state, include_events=include_events)
+
+    def restore_checkpoint(self, checkpoint: dict, *, event_history=None) -> None:
+        from ..checkpoint import restore
+        restore(self, checkpoint, event_history=event_history)
+
+    def _notify_checkpoint(self):
+        self._checkpoint_ready = True
+        if self.on_checkpoint is not None:
+            self.on_checkpoint(self)
 
     @property
     def finished(self) -> bool:
         """True once the sim has ended — a termination condition fired,
         ``stop()`` was called, or the round budget ran out."""
         return (
-            self.terminated_by is not None
+            self._end_emitted
+            or self.terminated_by is not None
             or self._stopped
-            or self.state.temporal.current_round >= self.max_rounds
+            or (self._continuous_time is None and self.state.temporal.current_round >= self.max_rounds)
         )
 
     def step(self) -> WorldState:
@@ -354,6 +378,7 @@ class SimulationEngine:
 
         try:
             if self._continuous_time is not None:
+                self._continuous_time.resume()
                 return self._run_continuous()
             return self._run_discrete()
         except BaseException:
@@ -392,20 +417,25 @@ class SimulationEngine:
         each event. Agent turns are rescheduled after their action duration.
         """
         ct = self._continuous_time
+        if self._end_emitted:
+            self._running = False
+            return self.state
         agents = self.state.get_agent_entities()
 
         # Only bootstrap on a FRESH start. On resume (pause→resume), the
         # event queue already holds the in-flight schedule — re-initializing
         # would double-schedule turns and re-emit the start event.
-        if ct.is_empty():
-            self._emit_event(
-                "simulation_start",
-                narrative=f"Continuous simulation begins. {len(agents)} agents active.",
-            )
-            ct.initialize_agents([a.id for a in agents], stagger=0.1)
+        if not self._start_emitted:
+            self._emit_start()
+            pending = [event for event in ct.queue._event_map.values() if not event.cancelled]
+            scheduled_agents = {event.entity_id for event in pending if event.event_type == "agent_turn"}
+            for index, agent in enumerate(agents):
+                if agent.id not in scheduled_agents:
+                    ct.schedule_agent_turn(agent.id, at_time=ct.current_time + index * 0.1)
             # Kick off the recurring environment clock so physics / property
             # dynamics / world events actually advance between agent turns.
-            ct.schedule_environment_tick()
+            if not any(event.event_type == "environment" and event.data.get("recurring") for event in pending):
+                ct.schedule_environment_tick()
             # Anchor the physics dt clock at the fresh start.
             self._last_env_time = ct.current_time
         elif not hasattr(self, "_last_env_time"):
@@ -419,6 +449,7 @@ class SimulationEngine:
             if event is None:
                 break  # No more events or past max_time
 
+            self._checkpoint_ready = False
             # Map continuous time to a pseudo-round for event logging
             pseudo_round = int(ct.current_time)
             self.state.temporal.current_round = pseudo_round
@@ -426,9 +457,11 @@ class SimulationEngine:
             if event.event_type == "agent_turn":
                 entity_id = event.entity_id
                 if not entity_id:
+                    self._notify_checkpoint()
                     continue
                 entity = self.state.get_entity(entity_id)
                 if not entity or not entity.alive:
+                    self._notify_checkpoint()
                     continue
 
                 # Snapshot the latest action BEFORE the turn so we can
@@ -472,6 +505,11 @@ class SimulationEngine:
                 self._last_env_time = ct.current_time
                 if event.data.get("recurring"):
                     ct.schedule_environment_tick()
+            else:
+                # Named scheduled events drive the same declarative trigger
+                # and termination machinery as action/world events.
+                self._emit_event(event.event_type, actor_id=event.entity_id,
+                                 data=event.data, narrative=event.data.get("narrative", ""))
 
             # Check termination
             triggered = self._check_termination()
@@ -483,14 +521,12 @@ class SimulationEngine:
                     narrative=f"Simulation terminated: {triggered.name} — {triggered.description}",
                 )
                 self._running = False
+            self._notify_checkpoint()
+            if not self._running:
                 break
 
         if not self._paused:
-            self._emit_event(
-                "simulation_end",
-                narrative=f"Continuous simulation ended at time {ct.current_time:.2f}.",
-            )
-            self._running = False
+            self._emit_end()
         return self.state
 
     def pause(self):
@@ -502,11 +538,13 @@ class SimulationEngine:
         if not self._paused:
             return self.state
         self._paused = False
+        self._running = True
         # Continuous-time sims must resume on the continuous event loop, not
         # the discrete round loop below — otherwise a paused continuous sim
         # silently switches to discrete semantics on resume.
         if self._continuous_time is not None:
             self._running = True
+            self._continuous_time.resume()
             return self._run_continuous()
         # Continue from the authoritative round counter — _run_discrete is
         # resume-aware (remaining budget only, bracket events emitted once).
@@ -518,8 +556,11 @@ class SimulationEngine:
 
     def _run_round(self):
         """Execute a single round with all phases."""
+        self._checkpoint_ready = False
         try:
             self._run_round_inner()
+            if not self._paused:
+                self._notify_checkpoint()
         except TypeError:
             import traceback
             logger.error(f"TypeError in round execution:\n{traceback.format_exc()}")
@@ -1182,9 +1223,18 @@ class SimulationEngine:
     ):
         """Canonical implementation in ``runtime/triggers.py``."""
         from .triggers import _emit_event
-        return _emit_event(
-            self, event_type, actor_id, target_id, action_name, data, narrative,
-        )
+        ready = self._checkpoint_ready
+        self._checkpoint_ready = False
+        try:
+            result = _emit_event(
+                self, event_type, actor_id, target_id, action_name, data, narrative,
+            )
+        except BaseException:
+            # A failed event/trigger cascade is not a safe checkpoint boundary.
+            raise
+        else:
+            self._checkpoint_ready = ready
+            return result
 
     def _fire_trigger(
         self,

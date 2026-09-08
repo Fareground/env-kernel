@@ -7,6 +7,7 @@ events from a priority queue and advances time to each event's fire time.
 Backward-compatible: DISCRETE mode (the default) is unaffected.
 """
 import heapq
+import math
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -26,6 +27,7 @@ class ScheduledEvent:
     data: Dict[str, Any] = field(default_factory=dict)
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
     cancelled: bool = False
+    sequence: Optional[int] = None
 
     def __lt__(self, other: "ScheduledEvent") -> bool:
         # Deterministic ordering: time, then priority, then entity_id.
@@ -40,6 +42,8 @@ class ScheduledEvent:
             return self.priority < other.priority
         if (self.entity_id or "") != (other.entity_id or ""):
             return (self.entity_id or "") < (other.entity_id or "")
+        if self.sequence is not None and other.sequence is not None:
+            return self.sequence < other.sequence
         return self.id < other.id
 
     def __eq__(self, other: object) -> bool:
@@ -59,6 +63,7 @@ class ScheduledEvent:
             "data": self.data,
             "id": self.id,
             "cancelled": self.cancelled,
+            "sequence": self.sequence,
         }
 
     @classmethod
@@ -71,6 +76,7 @@ class ScheduledEvent:
             data=data.get("data", {}),
             id=data.get("id", uuid.uuid4().hex[:8]),
             cancelled=data.get("cancelled", False),
+            sequence=data.get("sequence"),
         )
 
 
@@ -84,9 +90,17 @@ class EventQueue:
     def __init__(self):
         self._heap: List[ScheduledEvent] = []
         self._event_map: Dict[str, ScheduledEvent] = {}
+        self._next_sequence = 0
 
     def schedule(self, event: ScheduledEvent):
         """Add an event to the queue."""
+        if event.id in self._event_map:
+            raise ValueError('duplicate scheduled event id')
+        if event.sequence is None:
+            event.sequence = self._next_sequence
+        if type(event.sequence) is not int or event.sequence < 0:
+            raise ValueError('invalid scheduled event sequence')
+        self._next_sequence = max(self._next_sequence, event.sequence + 1)
         heapq.heappush(self._heap, event)
         self._event_map[event.id] = event
 
@@ -145,6 +159,7 @@ class EventQueue:
         """Serialize the queue."""
         return {
             "events": [e.to_dict() for e in self._event_map.values() if not e.cancelled],
+            "next_sequence": self._next_sequence,
         }
 
     @classmethod
@@ -154,6 +169,13 @@ class EventQueue:
             event = ScheduledEvent.from_dict(edata)
             if not event.cancelled:
                 queue.schedule(event)
+        next_sequence = data.get("next_sequence", queue._next_sequence)
+        if type(next_sequence) is not int or next_sequence < queue._next_sequence:
+            raise ValueError('invalid scheduled-event sequence counter')
+        sequences = [event.sequence for event in queue._event_map.values()]
+        if len(sequences) != len(set(sequences)):
+            raise ValueError('duplicate scheduled event sequence')
+        queue._next_sequence = next_sequence
         return queue
 
 
@@ -296,11 +318,10 @@ class ContinuousTemporalModel:
             return None
         if self._processed_count >= self.max_events:
             return None  # termination backstop: too many events this run
+        event = self.queue.peek()
+        if event is None or event.fire_time > self.max_time:
+            return None
         event = self.queue.pop()
-        if event is None:
-            return None
-        if event.fire_time > self.max_time:
-            return None
         self.current_time = event.fire_time
         self._processed_count += 1
         return event
@@ -359,6 +380,7 @@ class ContinuousTemporalModel:
             "environment_interval": self.environment_interval,
             "queue": self.queue.to_dict(),
             "processed_count": self._processed_count,
+            "paused": self._paused,
         }
 
     @classmethod
@@ -372,5 +394,20 @@ class ContinuousTemporalModel:
         )
         model.current_time = data.get("current_time", 0.0)
         model._processed_count = data.get("processed_count", 0)
+        model._paused = data.get("paused", False)
         model.queue = EventQueue.from_dict(data.get("queue", {}))
+        values = [model.current_time, model.max_time, model.default_turn_interval,
+                  model.environment_interval, *model.action_durations.values()]
+        if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) for value in values):
+            raise ValueError('continuous checkpoint times must be finite numbers')
+        if not 0 <= model.current_time <= model.max_time:
+            raise ValueError('continuous checkpoint time is outside its budget')
+        if (type(model.max_events) is not int or model.max_events < 0
+                or type(model._processed_count) is not int or not 0 <= model._processed_count <= model.max_events
+                or type(model._paused) is not bool):
+            raise ValueError('invalid continuous checkpoint counters or pause state')
+        for event in model.queue._event_map.values():
+            if (isinstance(event.fire_time, bool) or not isinstance(event.fire_time, (int, float))
+                    or not math.isfinite(event.fire_time) or event.fire_time < model.current_time):
+                raise ValueError('scheduled checkpoint event would move time backwards')
         return model

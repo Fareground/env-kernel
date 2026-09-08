@@ -339,10 +339,16 @@ def build_world_state(
     # the rules. The agent's chain-of-thought references these for any
     # action choice. Stored as a plain dict on state for easy perception
     # assembly.
+    private_information = any(prop.get("hidden") is True
+        for entity_type in schema.get("entity_types") or []
+        for prop in entity_type.get("properties") or [])
+    participant_rules = schema.get("participant_briefing")
+    if participant_rules is None and not private_information:
+        participant_rules = schema.get("rules", "")
     state._world_brief = {  # type: ignore[attr-defined]  # loader-injected runtime attr, read via getattr()
         "name": schema.get("name", ""),
-        "description": schema.get("description", ""),
-        "rules": schema.get("rules", ""),
+        "description": "" if private_information else schema.get("description", ""),
+        "rules": participant_rules if isinstance(participant_rules, str) else "",
     }
     # Derived rules — the unified inference layer. Stored on state so
     # the engine's tick loop can run them after agent turns.

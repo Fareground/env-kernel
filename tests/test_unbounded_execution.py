@@ -54,3 +54,19 @@ def test_uncapped_pause_and_stop_remain_available():
 def test_invalid_budgets_do_not_become_unbounded(budget):
     with pytest.raises(ValueError, match='max_rounds'):
         SimulationEngine(WorldState(), max_rounds=budget)
+
+
+def test_continuous_unbounded_clock_and_event_budget_survive_checkpoint():
+    from fg_env_kernel.continuous_time import ContinuousTemporalModel
+    clock = ContinuousTemporalModel(max_time=None, max_events=None)
+    sim = engine(continuous_time=clock)
+    sim.on_checkpoint = lambda current: current.pause() if current.state.temporal.current_round == 202 else None
+    sim.run()
+    assert sim.is_paused()
+    checkpoint = json.loads(json.dumps(sim.checkpoint(), allow_nan=False))
+    restored = engine(execution_checkpoint=checkpoint)
+    assert restored._continuous_time.max_time is None
+    assert restored._continuous_time.max_events is None
+    restored.run()
+    assert restored.terminated_by == 'goal'
+    assert restored.state.entities['a'].properties['score'] == 205

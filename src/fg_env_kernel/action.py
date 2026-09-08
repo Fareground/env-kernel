@@ -181,6 +181,9 @@ class Effect:
     description: str = ""
     condition: Optional[EffectCondition] = None  # If set, effect only applies when True
     scale_by_magnitude: bool = False    # When True, numeric value is multiplied by success_degree
+    # JSON loaders distinguish an omitted operand from an explicit null.
+    # None retains compatibility with Effects constructed directly in Python.
+    value_supplied: Optional[bool] = None
 
 
 @dataclass

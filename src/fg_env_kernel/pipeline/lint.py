@@ -65,8 +65,61 @@ def lint_template(template: Any, *, registry: Any = None) -> List[CompileIssue]:
     _check_expressions_for_unquoted_barewords(ctx, issues)
     _check_expression_property_references(ctx, issues)
     _check_unknown_spec_fields(ctx, issues)
+    _check_mutation_values(ctx, issues)
 
     return issues
+
+
+def _check_mutation_values(ctx: "_LintCtx", issues: List[CompileIssue]) -> None:
+    """Check literals wherever effects occur, including nested/derived rules.
+
+    Dynamic targets cannot always be typed statically; runtime dispatch performs
+    the same numeric/boolean checks after resolving their actual entity.
+    """
+    from ..effect_values import EffectValueError, expression_source, number, validate_operand
+
+    types = {
+        et["name"]: {p["name"]: p.get("type") for p in et.get("properties", [])}
+        for et in ctx.data.get("entity_types", [])
+    }
+
+    def walk(node: Any, path: str, actor_type: str | None = None, target_type: str | None = None) -> None:
+        if isinstance(node, list):
+            for i, item in enumerate(node):
+                walk(item, f"{path}[{i}]", actor_type, target_type)
+        elif isinstance(node, dict):
+            actor_type = node.get("actor_type", actor_type)
+            target_type = node.get("target_type", target_type)
+            op = node.get("operation")
+            if op in {"set", "add", "subtract", "multiply"} and "value" in node:
+                value = node["value"]
+                target = node.get("target", "actor")
+                et = actor_type if target in {"actor", "$actor"} else (
+                    target_type if target in {"target", "$target"} else ctx.entity_id_to_type.get(target))
+                kind = types.get(et, {}).get(node.get("field"))
+                try:
+                    validate_operand(value, numeric=op != "set")
+                    if op == "set" and expression_source(value) is None:
+                        if kind in {"int", "float"} or target == "physics":
+                            number(value)
+                            if kind == "int" and value != int(value):
+                                raise EffectValueError("integer property requires an integer value")
+                        elif kind == "bool" and not isinstance(value, bool):
+                            raise EffectValueError("boolean property requires a boolean value")
+                except EffectValueError as exc:
+                    issues.append(CompileIssue(
+                        severity="error", path=f"{path}.value", message=str(exc),
+                        hint="Supply a correctly typed literal or a valid dollar expression; missing references fail at runtime.",
+                    ))
+            for key, item in node.items():
+                # A literal payload can itself contain an 'operation' key.
+                # Only conditional values contain nested executable effects.
+                if key != "value" or op == "conditional":
+                    walk(item, f"{path}.{key}" if path else key, actor_type, target_type)
+
+    # Do not inspect data tables or stored snapshots as executable rules.
+    for key in ("actions", "derived_rules", "triggers", "temporal", "decks"):
+        walk(ctx.data.get(key), key)
 
 
 # ---------------------------------------------------------------------------

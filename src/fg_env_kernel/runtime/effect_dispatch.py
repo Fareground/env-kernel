@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from ..action import Effect, EffectOperation
 from ..resolution import ResolutionResult
+from ..effect_values import EffectValueError, number, resolve_value
+from ..types import PropertyType
 
 if TYPE_CHECKING:
     from .engine import SimulationEngine
@@ -179,6 +181,7 @@ def _apply_effects_body(
                 operation=effect.operation,
                 field=effect.field,
                 value=effect.value,
+                value_supplied=effect.value_supplied,
                 resource=effect.resource,
                 relation_type=effect.relation_type,
                 description=effect.description,
@@ -203,6 +206,7 @@ def _apply_effects_body(
                     operation=effect.operation,
                     field=effect.field,
                     value=effect.value,
+                    value_supplied=effect.value_supplied,
                     resource=effect.resource,
                     relation_type=effect.relation_type,
                     description=effect.description,
@@ -215,7 +219,23 @@ def _apply_effects_body(
             continue
 
         # Scale numeric values by success_degree when scale_by_magnitude is True
-        effective_value = _resolve_val(effect.value)
+        mutation = effect.operation in {
+            EffectOperation.SET, EffectOperation.ADD,
+            EffectOperation.SUBTRACT, EffectOperation.MULTIPLY,
+        }
+        supplied = effect.value_supplied if effect.value_supplied is not None else effect.value is not None
+        try:
+            effective_value = resolve_value(
+                effect.value, actor=actor, target=target, params=params,
+                state=engine.state, last_event=last_event_payload, result=result, rng=engine._rng,
+            ) if mutation else _resolve_val(effect.value)
+            if mutation and effect.operation != EffectOperation.SET:
+                if not supplied:
+                    effective_value = 1 if effect.operation == EffectOperation.MULTIPLY else (result.magnitude if result else 0)
+                number(effective_value)
+        except EffectValueError as exc:
+            _drop(effect, "invalid_effect_value", str(exc))
+            continue
         if effect.scale_by_magnitude and result and isinstance(effective_value, (int, float)):
             effective_value = effective_value * result.success_degree
 
@@ -230,8 +250,11 @@ def _apply_effects_body(
                       "effect targets physics but the world has no model")
                 continue
             name = effect.field
-            num = effective_value if isinstance(
-                effective_value, (int, float)) else None
+            try:
+                num = number(effective_value)
+            except EffectValueError as exc:
+                _drop(effect, "invalid_effect_value", str(exc))
+                continue
             var = model.variables.get(name)
             slot = "variable" if var is not None else (
                 "param" if name in model.params else None)
@@ -252,6 +275,11 @@ def _apply_effects_body(
                 _drop(effect, "unsupported_physics_op",
                       f"physics target supports set/add/subtract/multiply, "
                       f"not {op_key!r}")
+                continue
+            try:
+                number(new)
+            except EffectValueError as exc:
+                _drop(effect, "invalid_effect_value", str(exc))
                 continue
             if var is not None:
                 if var.min is not None:
@@ -327,13 +355,40 @@ def _apply_effects_body(
                   f"no entity for target {effect.target!r}")
             continue
 
+        if mutation and ent is not None and effect.field:
+            schema = engine.state.entity_types.get(ent.entity_type)
+            prop_schema = schema.get_property_schema(effect.field) if schema else None
+            try:
+                if effect.operation == EffectOperation.SET:
+                    if prop_schema and prop_schema.type in (PropertyType.INT, PropertyType.FLOAT):
+                        number(effective_value)
+                        if prop_schema.type == PropertyType.INT:
+                            if effective_value != int(effective_value):
+                                raise EffectValueError(f"{effect.field!r} requires an integer")
+                            effective_value = int(effective_value)
+                    elif prop_schema and prop_schema.type == PropertyType.BOOL and not isinstance(effective_value, bool):
+                        raise EffectValueError(f"{effect.field!r} requires a boolean")
+                else:
+                    old = number(ent.get(effect.field, 0))
+                    operand = number(effective_value)
+                    new = old + operand if effect.operation == EffectOperation.ADD else (
+                        old - operand if effect.operation == EffectOperation.SUBTRACT else old * operand)
+                    number(new)
+                    if prop_schema and prop_schema.type not in (PropertyType.INT, PropertyType.FLOAT):
+                        raise EffectValueError(f"{effect.field!r} is not a numeric property")
+                    if prop_schema and prop_schema.type == PropertyType.INT and new != int(new):
+                        raise EffectValueError(f"{effect.field!r} requires an integer result")
+            except EffectValueError as exc:
+                _drop(effect, "invalid_effect_value", str(exc))
+                continue
+
         if effect.operation == EffectOperation.SET and effect.field:
             old_val = ent.get(effect.field)
             ent.set(effect.field, effective_value)
             changes.append({"entity": ent.id, "field": effect.field, "old": old_val, "new": effective_value})
 
         elif effect.operation == EffectOperation.ADD and effect.field:
-            val = effective_value if isinstance(effective_value, (int, float)) else (result.magnitude if result else 0)
+            val = effective_value
             schema = engine.state.entity_types.get(ent.entity_type, None)
             prop_schema = schema.get_property_schema(effect.field) if schema else None
             old_val = ent.get(effect.field, 0)
@@ -341,7 +396,7 @@ def _apply_effects_body(
             changes.append({"entity": ent.id, "field": effect.field, "old": old_val, "new": ent.get(effect.field)})
 
         elif effect.operation == EffectOperation.MULTIPLY and effect.field:
-            multiplier = effective_value if isinstance(effective_value, (int, float)) else 1.0
+            multiplier = effective_value
             schema = engine.state.entity_types.get(ent.entity_type, None)
             prop_schema = schema.get_property_schema(effect.field) if schema else None
             old_val = ent.get(effect.field, 0)
@@ -353,11 +408,13 @@ def _apply_effects_body(
                         new_val = max(prop_schema.min_value, new_val)
                     if prop_schema.max_value is not None:
                         new_val = min(prop_schema.max_value, new_val)
+                    if prop_schema.type == PropertyType.INT:
+                        new_val = int(new_val)
                 ent.set(effect.field, new_val)
                 changes.append({"entity": ent.id, "field": effect.field, "old": old_val, "new": ent.get(effect.field)})
 
         elif effect.operation == EffectOperation.SUBTRACT and effect.field:
-            val = effective_value if isinstance(effective_value, (int, float)) else (result.magnitude if result else 0)
+            val = effective_value
             schema = engine.state.entity_types.get(ent.entity_type, None)
             prop_schema = schema.get_property_schema(effect.field) if schema else None
             old_val = ent.get(effect.field, 0)

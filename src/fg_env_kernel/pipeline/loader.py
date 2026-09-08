@@ -41,7 +41,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 if TYPE_CHECKING:
     from ..continuous_time import ContinuousTemporalModel
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer, model_validator
 
 from ..action import (
     ActionDefinition,
@@ -142,6 +142,22 @@ class EffectSpec(BaseModel):
     description: str = ""
     condition: Optional[EffectConditionSpec] = None
     scale_by_magnitude: bool = False
+
+    @field_validator("value")
+    @classmethod
+    def validate_value(cls, value, info):
+        from ..effect_values import validate_operand
+        operation = info.data.get("operation")
+        if operation in {"set", "add", "subtract", "multiply"}:
+            validate_operand(value, numeric=operation != "set")
+        return value
+
+    @model_serializer(mode="wrap")
+    def preserve_missing_value(self, handler):
+        data = handler(self)
+        if "value" not in self.model_fields_set:
+            data.pop("value", None)
+        return data
 
 
 class ActionSpec(BaseModel):
@@ -729,6 +745,7 @@ def _parse_effects(
             operation=operation,
             field=eff.get("field"),
             value=eff.get("value"),
+            value_supplied="value" in eff,
             resource=eff.get("resource"),
             relation_type=eff.get("relation_type"),
             description=eff.get("description", ""),

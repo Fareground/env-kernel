@@ -235,6 +235,13 @@ def compile_template(
                         "the failing action's effects/preconditions."
                     ),
                 ))
+            for effect in report.invalid_effects:
+                result.errors.append(CompileIssue(
+                    severity="error", path="",
+                    message=(f"smoke: invalid {effect.get('operation')} effect on "
+                             f"{effect.get('target')}.{effect.get('field')}: {effect.get('detail')}"),
+                    hint="Fix the value expression and its referenced data before running this world.",
+                ))
             for w in report.warnings:
                 result.warnings.append(CompileIssue(
                     severity="warning", path="", message=f"smoke: {w}",

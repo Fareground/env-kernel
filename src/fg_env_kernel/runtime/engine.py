@@ -111,6 +111,7 @@ def _coerce_effects(raw: Any, registry: Optional["KernelRegistry"] = None) -> Li
             operation=op,
             field=d.get("field"),
             value=d.get("value"),
+            value_supplied="value" in d,
             resource=d.get("resource"),
             relation_type=d.get("relation_type"),
             description=str(d.get("description", "")),

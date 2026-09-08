@@ -60,13 +60,14 @@ class SmokeReport:
     seed: int = 0
     warnings: List[str] = field(default_factory=list)
     actions_expected: bool = True   # false for autonomous worlds without a decision cast
+    invalid_effects: List[Dict[str, Any]] = field(default_factory=list)
 
     @property
     def healthy(self) -> bool:
         """Ran at least one round without crashing, and exercised actions
         when the world declares actions or starts with decision agents.
         Autonomous dynamics do not need invented agent decisions."""
-        if self.crash:
+        if self.crash or self.invalid_effects:
             return False
         if self.rounds_run == 0 or (self.actions_expected and not self.actions_taken):
             return False
@@ -81,6 +82,8 @@ class SmokeReport:
             lines.append(f"  terminated_by: {self.terminated_by}")
         if self.crash:
             lines.append(f"  CRASH: {self.crash}")
+        for effect in self.invalid_effects:
+            lines.append(f"  INVALID EFFECT: {effect.get('operation')} {effect.get('target')}.{effect.get('field')}: {effect.get('detail')}")
         lines.append(f"  actions taken: {dict(self.actions_taken)}")
         lines.append(f"  action coverage: {self.action_coverage_pct:.0%} "
                      f"({len(self.actions_taken)}/{self.declared_actions})")
@@ -195,10 +198,15 @@ def smoke_test(
     actions_taken: Dict[str, int] = defaultdict(int)
     events_count = [0]
     terminated_by: List[Optional[str]] = [None]
+    invalid_effects: List[Dict[str, Any]] = []
 
     def _on_event(ev: Dict[str, Any]) -> None:
         events_count[0] += 1
         et = ev.get("event_type") or ""
+        if et == "effect_dropped" and (ev.get("data") or {}).get("reason") == "invalid_effect_value":
+            detail = dict(ev["data"])
+            if detail not in invalid_effects:
+                invalid_effects.append(detail)
         if et == "action_resolved":
             name = ev.get("action_name")
             if name:
@@ -266,6 +274,7 @@ def smoke_test(
         seed=seed,
         warnings=warnings,
         actions_expected=actions_expected,
+        invalid_effects=invalid_effects,
     )
 
 

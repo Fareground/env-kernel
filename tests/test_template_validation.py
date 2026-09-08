@@ -25,7 +25,7 @@ def _valid_template():
             "description": "Place a bid",
             "actor_type": "Bidder",
             "effects_on_success": [{"target": "actor", "operation": "set",
-                                    "field": "offer", "value": "1.0"}],
+                                    "field": "offer", "value": 1.0}],
         }],
         "temporal": {"max_rounds": 2},
     }

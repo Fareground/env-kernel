@@ -143,6 +143,7 @@ def _apply_effects_body(
             cond_truthy = engine._evaluate_conditional_clause(
                 spec, actor=actor, target=target, params=params,
                 result=result, resolve_val=_resolve_val,
+                last_event=last_event_payload,
             )
             branch_raw = spec.get("then") if cond_truthy else spec.get("else")
             if branch_raw:

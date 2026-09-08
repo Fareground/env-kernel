@@ -1125,13 +1125,13 @@ class SimulationEngine:
         return apply_effects(self, effects, actor, target, params, result)
 
     def _evaluate_conditional_clause(
-        self, spec, *, actor, target, params, result, resolve_val,
+        self, spec, *, actor, target, params, result, resolve_val, last_event=None,
     ) -> bool:
         """Canonical implementation in ``runtime/conditions.py``."""
         from .conditions import _evaluate_conditional_clause
         return _evaluate_conditional_clause(
             self, spec, actor=actor, target=target, params=params,
-            result=result, resolve_val=resolve_val,
+            result=result, resolve_val=resolve_val, last_event=last_event,
         )
 
     def _evaluate_world_condition(self, spec: dict) -> bool:

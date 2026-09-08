@@ -305,16 +305,8 @@ def _shim_engine_for_ctx(ctx: EffectContext) -> Any:
             return False
 
         def _evaluate_conditional_clause(self, spec, **kwargs):
-            from .predicates import evaluate as _eval
-            expr = spec.get("if_expr") or spec.get("expr")
-            if expr:
-                return _eval(
-                    expr, actor=kwargs.get("actor"), target=kwargs.get("target"),
-                    params=kwargs.get("params"), state=self.state,
-                    rng=self._rng, result=kwargs.get("result"),
-                )
-            # Conservative fallback
-            return False
+            from .runtime.conditions import _evaluate_conditional_clause
+            return _evaluate_conditional_clause(self, spec, **kwargs)
 
         def _resolve_multi_target(self, target_token: str, actor, target):
             # Minimal: support `all` / `all_others` / specific id lookup

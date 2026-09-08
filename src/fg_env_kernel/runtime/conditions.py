@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _evaluate_conditional_clause(engine, spec, *, actor, target, params, result, resolve_val,
+def _evaluate_conditional_clause(engine, spec, *, actor, target, params, result, resolve_val, last_event=None,
 ) -> bool:
     """Evaluate a CONDITIONAL effect's `if` / `if_expr` clause.
 
@@ -29,39 +29,30 @@ def _evaluate_conditional_clause(engine, spec, *, actor, target, params, result,
       { "if": { subject, field?, operator, value, check_type? } }
         — uses the existing EffectCondition machinery.
       { "if_expr": "<expression>" }
-        — resolves the expression; truthy ⇒ branch fires.
+        — uses the same predicate evaluator as action preconditions.
       { "if_compare": [lhs, "op", rhs] }
         — both sides may be expressions; supports == != > >= < <=
     """
     if not isinstance(spec, dict):
         return False
 
-    if "if_expr" in spec:
-        return bool(resolve_val(spec["if_expr"]))
+    from ..predicates import evaluate
+    context = dict(actor=actor, target=target, params=params, result=result,
+                   last_event=last_event, state=engine.state, rng=engine._rng)
+    if "if_expr" in spec or "expr" in spec:
+        return evaluate(spec.get("if_expr", spec.get("expr")), **context)
 
     if "if_compare" in spec:
         cmp = spec["if_compare"]
         if not (isinstance(cmp, (list, tuple)) and len(cmp) == 3):
             return False
-        lhs = resolve_val(cmp[0])
-        op = str(cmp[1])
-        rhs = resolve_val(cmp[2])
-        try:
-            if op == "==": return lhs == rhs
-            if op == "!=": return lhs != rhs
-            if op == ">":  return lhs > rhs
-            if op == ">=": return lhs >= rhs
-            if op == "<":  return lhs < rhs
-            if op == "<=": return lhs <= rhs
-            if op == "in":  return lhs in rhs
-            if op == "not_in": return lhs not in rhs
-        except TypeError:
-            return False
-        return False
+        return evaluate({"op": cmp[1], "left": cmp[0], "right": cmp[2]}, **context)
 
     if "if" in spec and isinstance(spec["if"], dict):
         from ..action import EffectCondition
         d = spec["if"]
+        if "expr" in d:
+            return evaluate(d["expr"], **context)
         try:
             cond = EffectCondition(
                 subject=str(d.get("subject", "actor")),
@@ -84,42 +75,20 @@ def _evaluate_world_condition(engine, spec: dict) -> bool:
       `if_expr`, `if_compare: [lhs, op, rhs]`, or
       `expr` + `operator` + `value` shorthand.
     """
-    from ..effects import resolve_expression
+    from ..predicates import evaluate
     if not isinstance(spec, dict):
         return False
     if "if_expr" in spec:
-        return bool(resolve_expression(spec["if_expr"], state=engine.state, rng=engine._rng))
+        return evaluate(spec["if_expr"], state=engine.state, rng=engine._rng)
     if "if_compare" in spec:
         cmp = spec["if_compare"]
         if not (isinstance(cmp, (list, tuple)) and len(cmp) == 3):
             return False
-        lhs = resolve_expression(cmp[0], state=engine.state, rng=engine._rng)
-        op = str(cmp[1])
-        rhs = resolve_expression(cmp[2], state=engine.state, rng=engine._rng)
-        try:
-            if op == "==": return lhs == rhs
-            if op == "!=": return lhs != rhs
-            if op == ">":  return lhs > rhs
-            if op == ">=": return lhs >= rhs
-            if op == "<":  return lhs < rhs
-            if op == "<=": return lhs <= rhs
-            if op == "in":  return lhs in rhs
-        except TypeError:
-            return False
-        return False
+        return evaluate({"op": cmp[1], "left": cmp[0], "right": cmp[2]},
+                        state=engine.state, rng=engine._rng)
     if "expr" in spec:
-        lhs = resolve_expression(spec["expr"], state=engine.state, rng=engine._rng)
-        op = spec.get("operator", "gte")
-        rhs = spec.get("value", 0)
-        try:
-            if op == "gte": return lhs >= rhs
-            if op == "lte": return lhs <= rhs
-            if op == "gt":  return lhs > rhs
-            if op == "lt":  return lhs < rhs
-            if op == "eq":  return lhs == rhs
-            if op == "neq": return lhs != rhs
-        except TypeError:
-            return False
+        return evaluate({"op": spec.get("operator", "gte"), "left": spec["expr"], "right": spec.get("value", 0)},
+                        state=engine.state, rng=engine._rng)
     return False
 
 def _resolve_multi_target(engine, target_token: str, actor, target):

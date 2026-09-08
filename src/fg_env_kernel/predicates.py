@@ -84,9 +84,11 @@ def evaluate(
         if isinstance(predicate, bool):
             return predicate
         if isinstance(predicate, dict):
-            return _eval_dict(predicate, ctx)
+            answer = _eval_dict(predicate, ctx)
+            return answer and not ctx.unresolved
         if isinstance(predicate, str):
-            return _eval_string(predicate, ctx)
+            answer = _eval_string(predicate, ctx)
+            return answer and not ctx.unresolved
         return bool(predicate)
     except Exception as exc:
         # Fail closed — but VISIBLY. Each failing predicate is logged once per
@@ -138,6 +140,9 @@ class _Ctx:
     last_event: Dict[str, Any]
     result: Any
     rng: Any
+    # Missing data must not become True after negating a comparison or
+    # combining it with arithmetic. Shared by every predicate entry point.
+    unresolved: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -602,7 +607,10 @@ def _resolve_dollar(src: str, ctx: _Ctx) -> Any:
     # for predicate purposes that's a missing value, not the literal
     # string. Map it back to None so comparisons fail closed.
     if isinstance(val, str) and val == src:
+        ctx.unresolved = True
         return None
+    if val is None:
+        ctx.unresolved = True
     return val
 
 
@@ -893,7 +901,12 @@ def _eval_special(op: str, node: Dict[str, Any], ctx: _Ctx) -> bool:
         return state.recipes.can_craft(ent.id, node.get("value"), state)
 
     if op == "defined":
-        return _truthy(_eval_value(node.get("left") or node.get("value"), ctx))
+        # An explicit presence check is allowed to observe missing data;
+        # present zero/False values are defined as well.
+        was_unresolved = ctx.unresolved
+        value = _eval_value(node.get("left", node.get("value")), ctx)
+        ctx.unresolved = was_unresolved
+        return value is not None
 
     return False
 

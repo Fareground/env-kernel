@@ -176,7 +176,7 @@ def _evaluate_effect_condition(engine, condition, actor, target, params=None) ->
     logger.warning(f"Unknown effect condition check_type: '{condition.check_type}'")
     return False  # Unknown check_type: fail safe
 
-def _check_target_preconditions(engine, actor, target, action_def) -> bool:
+def _check_target_preconditions(engine, actor, target, action_def, params=None) -> bool:
     """Check preconditions that require both actor and target (IS_ADJACENT, faction checks)."""
     from ..action import Operator
     for pc in action_def.preconditions:
@@ -185,7 +185,7 @@ def _check_target_preconditions(engine, actor, target, action_def) -> bool:
         expr = getattr(pc, "expr", None)
         if expr:
             from ..predicates import evaluate as _predicate_eval
-            if not _predicate_eval(expr, actor=actor, target=target, state=engine.state, rng=engine._rng):
+            if not _predicate_eval(expr, actor=actor, target=target, state=engine.state, rng=engine._rng, params=params):
                 return False
             continue
         if pc.operator == Operator.IS_ADJACENT:

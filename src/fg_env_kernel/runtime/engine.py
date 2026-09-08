@@ -1190,10 +1190,10 @@ class SimulationEngine:
         from .conditions import _evaluate_effect_condition
         return _evaluate_effect_condition(self, condition, actor, target, params)
 
-    def _check_target_preconditions(self, actor, target, action_def) -> bool:
+    def _check_target_preconditions(self, actor, target, action_def, params=None) -> bool:
         """Canonical implementation in ``runtime/conditions.py``."""
         from .conditions import _check_target_preconditions
-        return _check_target_preconditions(self, actor, target, action_def)
+        return _check_target_preconditions(self, actor, target, action_def, params)
 
     @staticmethod
     def _compare(val, operator: str, target_val) -> bool:

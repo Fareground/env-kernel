@@ -37,3 +37,9 @@ additional rounds (time units for continuous runs). An explicit seed override
 starts a new RNG stream while retaining world state. Old world-only snapshots
 cannot promise execution continuation and require a new simulation. Terminal
 conditions require choosing an earlier checkpoint.
+
+An engine created with `max_rounds=None` has no discrete round budget. It runs
+until a world termination condition or an explicit stop, while pause and step
+remain available. The null budget survives JSON checkpoint restoration; hosts
+must not replace it with a numeric fallback. Explicit finite budgets remain
+available for bounded experiments, and must not imply a natural game verdict.

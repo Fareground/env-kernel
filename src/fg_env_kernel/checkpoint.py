@@ -114,6 +114,8 @@ def restore(engine: Any, checkpoint: dict, *, event_history=None) -> None:
             raise ValueError('unsupported execution checkpoint format')
         execution = data['execution']
         for key in ('seed', 'max_rounds', 'parallel_decisions'):
+            if key == 'max_rounds' and execution[key] is None:
+                continue
             if type(execution[key]) is not int or (key != 'seed' and execution[key] < 0):
                 raise ValueError(f'invalid execution {key}')
         for key in ('stopped', 'start_emitted', 'end_emitted', 'paused'):

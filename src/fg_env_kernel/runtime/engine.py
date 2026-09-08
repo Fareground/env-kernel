@@ -197,7 +197,7 @@ class SimulationEngine:
         decision_fn: Optional[Callable] = None,
         outcome_fn: Optional[Callable] = None,
         narrative_fn: Optional[Callable] = None,
-        max_rounds: int = 100,
+        max_rounds: Optional[int] = 100,
         seed: Optional[int] = None,
         on_round_start: Optional[Callable] = None,
         on_round_end: Optional[Callable] = None,
@@ -232,6 +232,8 @@ class SimulationEngine:
         self.parallel_decisions = parallel_decisions  # 0 = sequential, N = max concurrent LLM calls
         self.outcome_fn = outcome_fn      # fn(entity_id, action_name, success, narrative, details) -> None
         self.narrative_fn = narrative_fn   # fn(actor, target, action_def, action_instance, result, state_changes) -> str
+        if max_rounds is not None and (type(max_rounds) is not int or max_rounds < 0):
+            raise ValueError('max_rounds must be a non-negative integer or None')
         self.max_rounds = max_rounds
         self._checkpoint_ready = True
         self.on_checkpoint = on_checkpoint
@@ -315,7 +317,8 @@ class SimulationEngine:
             self._end_emitted
             or self.terminated_by is not None
             or self._stopped
-            or (self._continuous_time is None and self.state.temporal.current_round >= self.max_rounds)
+            or (self._continuous_time is None and self.max_rounds is not None
+                and self.state.temporal.current_round >= self.max_rounds)
         )
 
     def step(self) -> WorldState:
@@ -397,10 +400,7 @@ class SimulationEngine:
             return self.state
         self._emit_start()
 
-        remaining = self.max_rounds - self.state.temporal.current_round
-        for _ in range(max(0, remaining)):
-            if not self._running or self._paused:
-                break
+        while self._running and not self._paused and not self.finished:
             self.state.temporal.advance_round()
             self._run_round()
             if self._paused:

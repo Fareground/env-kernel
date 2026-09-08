@@ -3,7 +3,8 @@
 Agents can send messages to each other -- direct, broadcast, or faction-wide.
 Messages appear in perception and influence agent decisions.
 """
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+import copy
 from typing import Any, Dict, List, Optional
 
 
@@ -87,4 +88,26 @@ class MessageBoard:
                 for m in self._current_round_messages
             ],
             "history_count": len(self._history),
+            "history": [asdict(message) for message in self._history],
         }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "MessageBoard":
+        current = data.get("current_round", [])
+        history = data.get("history")
+        if history is None:
+            if data.get("history_count", len(current)) != len(current):
+                raise ValueError("legacy message snapshot omits historical messages; cannot safely resume")
+            history = current
+        if data.get("history_count", len(history)) != len(history):
+            raise ValueError("message history count does not match snapshot")
+        if current and history[-len(current):] != current:
+            raise ValueError("current-round messages are not the end of message history")
+        board = cls()
+        for row in history:
+            message = Message(**copy.deepcopy(row))
+            if message.message_type not in {"broadcast", "direct", "faction"}:
+                raise ValueError(f"unknown message type {message.message_type!r}")
+            board._history.append(message)
+        board._current_round_messages = board._history[-len(current):] if current else []
+        return board

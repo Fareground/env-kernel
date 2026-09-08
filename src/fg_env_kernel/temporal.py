@@ -1,6 +1,6 @@
 """Turn-based temporal model."""
 import random as random_module
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
@@ -186,10 +186,12 @@ class TemporalModel:
         d = {
             "mode": self.mode.value,
             "current_round": self.current_round,
+            "current_phase_index": self.current_phase_index,
             "current_phase": phase_name,
             "current_turn_index": self.current_turn_index,
             "turn_order": self.turn_order,
             "phases": [p.name for p in self.phases],
+            "phase_definitions": [asdict(p) for p in self.phases],
         }
         if self.round_duration_seconds is not None:
             d["round_duration_seconds"] = self.round_duration_seconds

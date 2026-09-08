@@ -4,6 +4,7 @@ Factions enable coalition gameplay, diplomacy, and collective action.
 Entities belong to at most one faction at a time.
 """
 from dataclasses import dataclass, field
+import copy
 from typing import Any, Dict, List, Optional
 
 
@@ -121,8 +122,31 @@ class FactionManager:
                     "description": f.description,
                     "properties": dict(f.properties),
                     "member_ids": list(f.member_ids),
+                    "parent": f.parent,
                 }
                 for fid, f in self._factions.items()
             },
             "membership": dict(self._membership),
         }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "FactionManager":
+        manager = cls()
+        for ident, row in data.get("factions", {}).items():
+            faction = Faction(**copy.deepcopy(row))
+            if faction.id != ident or len(set(faction.member_ids)) != len(faction.member_ids):
+                raise ValueError("inconsistent faction id or duplicate members")
+            if any(member in manager._membership for member in faction.member_ids):
+                raise ValueError("entity belongs to multiple factions")
+            manager.register(faction)
+        if data.get("membership", manager._membership) != manager._membership:
+            raise ValueError("faction membership index disagrees with member lists")
+        for faction in manager._factions.values():
+            seen = {faction.id}
+            parent = faction.parent
+            while parent is not None:
+                if parent in seen or parent not in manager._factions:
+                    raise ValueError("cyclic or missing faction parent")
+                seen.add(parent)
+                parent = manager._factions[parent].parent
+        return manager

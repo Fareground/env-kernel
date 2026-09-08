@@ -1,5 +1,6 @@
 """Complete world state -- the runtime state graph."""
-from dataclasses import dataclass, field
+import copy
+from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .entity import EntityType, Entity
@@ -122,8 +123,8 @@ class ActionHistory:
                       for r in records]
                 for eid, records in self._history.items()
             },
-            "unlocked": {eid: list(actions) for eid, actions in self._unlocked.items()},
-            "locked": {eid: list(actions) for eid, actions in self._locked.items()},
+            "unlocked": {eid: sorted(actions) for eid, actions in self._unlocked.items()},
+            "locked": {eid: sorted(actions) for eid, actions in self._locked.items()},
             "cooldowns": [
                 [eid, action, until]
                 for (eid, action), until in self._cooldowns.items()
@@ -727,7 +728,12 @@ class WorldState:
 
     def to_dict(self) -> dict:
         """Serialize the full state to a dictionary."""
-        return {
+        derived = getattr(self, "_derived_rules", None)
+        return copy.deepcopy({
+            "snapshot_version": 2,
+            "resource_definitions": {name: asdict(rt) for name, rt in self.resource_types.items()},
+            "tables": self.tables,
+            "derived_rules": derived.to_dict() if derived is not None else None,
             "entities": {eid: e.to_dict() for eid, e in self.entities.items()},
             "resources": {rn: rp.to_dict() for rn, rp in self.resources.items()},
             "relations": self.relations.to_dict(),
@@ -759,6 +765,11 @@ class WorldState:
             "polls": self.polls.to_dict(),
             "connectors": self.connectors.to_dict() if self.connectors else None,
             "domain_modules": self.domain_modules.to_dict() if self.domain_modules else None,
+            "domain_module_aliases": {
+                alias: name for alias, obj in self.modules.items()
+                for name, module in (self.domain_modules._modules.items() if self.domain_modules else [])
+                if obj is module
+            },
             "controller": self.controller.to_dict() if self.controller else None,
             "cognition": self.cognition.to_dict() if self.cognition else None,
             "crowd_agents": self.crowd_agents.to_dict() if self.crowd_agents else None,
@@ -767,186 +778,18 @@ class WorldState:
             # Built-in subsystems are already serialized under their
             # named keys above; this captures the rest.
             "plugin_modules": self._plugin_modules_to_dict(),
-        }
+        })
 
     # -- Restore --
 
     def apply_snapshot(self, data: Dict[str, Any]) -> None:
-        """Restore mutable state from a snapshot dict produced by
-        ``to_dict()``.
+        """Atomically replace supplied snapshot sections, preserving schema registrations.
 
-        ``apply_snapshot`` overlays state onto ``self`` in place — the
-        schema (entity_types, action_definitions, etc.) must already
-        be registered. This is the canonical in-place restore path
-        for fork-from-round-N replay.
-
-        For full reconstruction from a snapshot alone, use
-        ``WorldState.from_dict(data, schema_provider=...)``.
-
-        Errors restoring individual subsystems are logged and isolated
-        — a corrupt section doesn't abort the rest of the restore.
+        Missing sections support legacy partial snapshots. Invalid or unrestorable
+        sections raise SnapshotRestoreError without changing the existing world.
         """
-        import logging
-        log = logging.getLogger(__name__)
-
-        # ---- Core entities -------------------------------------------
-        for entity_id, ent_data in (data.get("entities") or {}).items():
-            entity = self.entities.get(entity_id)
-            if entity is None:
-                # Entity doesn't exist locally — try to construct from snapshot
-                try:
-                    from .entity import Entity as _Entity
-                    self.entities[entity_id] = _Entity(
-                        id=entity_id,
-                        name=ent_data.get("name", entity_id),
-                        entity_type=ent_data.get("entity_type", ""),
-                        properties=dict(ent_data.get("properties", {})),
-                        location_id=ent_data.get("location_id"),
-                        alive=ent_data.get("alive", True),
-                    )
-                except Exception:
-                    log.exception("apply_snapshot: failed to construct entity %s", entity_id)
-                    continue
-            else:
-                entity.properties = dict(ent_data.get("properties", {}))
-                entity.alive = ent_data.get("alive", True)
-                entity.location_id = ent_data.get("location_id")
-
-        # ---- Resources -----------------------------------------------
-        for res_name, res_data in (data.get("resources") or {}).items():
-            pool = self.resources.get(res_name)
-            if pool is not None:
-                pool.holdings = dict(res_data.get("holdings", {}))
-                pool.unallocated = res_data.get("unallocated", 0)
-
-        # ---- Spatial state -------------------------------------------
-        if "adjacency" in data:
-            self.adjacency = dict(data["adjacency"])
-        if "locations" in data:
-            self.locations = dict(data["locations"])
-        if "spatial_index" in data:
-            self.spatial_index = {
-                loc: set(eids) for loc, eids in (data.get("spatial_index") or {}).items()
-            }
-        elif "locations" in data:
-            # Rebuild spatial_index from locations if not snapshotted
-            self.spatial_index = {}
-            for eid, loc in self.locations.items():
-                self.spatial_index.setdefault(loc, set()).add(eid)
-
-        # ---- Temporal ------------------------------------------------
-        temporal_data = data.get("temporal")
-        if isinstance(temporal_data, dict):
-            for key in ("current_round", "current_phase_index", "current_turn_index"):
-                if key in temporal_data:
-                    setattr(self.temporal, key, temporal_data[key])
-
-        # ---- Relations -----------------------------------------------
-        relations_data = data.get("relations")
-        if isinstance(relations_data, dict):
-            for edge in relations_data.get("edges", []):
-                try:
-                    self.relations.set(
-                        edge["from"], edge["to"], edge["type"],
-                        edge.get("value", 0.0),
-                    )
-                except Exception:
-                    log.exception("apply_snapshot: relation edge restore failed")
-
-        if isinstance(data.get("properties"), dict):
-            self.properties = dict(data["properties"])
-
-        # ---- Named subsystems via their own from_dict ----------------
-        # The (manager attribute, snapshot key, importable from_dict)
-        # triples below cover every built-in subsystem that ships a
-        # symmetric serializer. Each is wrapped in a try/except so a
-        # corrupt slice can't poison the whole restore.
-        named_restorers: List[tuple] = [
-            ("action_history", "action_history", "ActionHistory", "state"),
-            ("status_effects", "status_effects", "StatusEffectTracker", "status_effects"),
-            ("factions", "factions", "FactionManager", "factions"),
-            ("sequences", "sequences", "SequenceTracker", "sequences"),
-            ("messages", "messages", "MessageBoard", "messaging"),
-            ("location_properties", "location_properties", "LocationPropertyManager", "location_properties"),
-            ("inventory", "inventory", "InventoryManager", "inventory"),
-            ("goals", "goals", "GoalTracker", "goals"),
-            ("skills", "skills", "SkillTracker", "skills"),
-            ("recipes", "recipes", "RecipeManager", "crafting"),
-            ("negotiations", "negotiations", "NegotiationManager", "negotiation"),
-            ("plans", "plans", "PlanManager", "planning"),
-            ("roles", "roles", "RoleRegistry", "roles"),
-            ("polls", "polls", "PollManager", "polls"),
-        ]
-        for attr, key, cls_name, module_name in named_restorers:
-            section = data.get(key)
-            if section is None:
-                continue
-            try:
-                module = __import__(f"fg_env_kernel.{module_name}", fromlist=[cls_name])
-                cls = getattr(module, cls_name)
-                restored = cls.from_dict(section)
-                setattr(self, attr, restored)
-                self.modules[key] = restored
-            except Exception:
-                log.exception("apply_snapshot: %s restore failed", attr)
-
-        # ---- world_models (dict of AgentWorldModel) ------------------
-        wm_data = data.get("world_models")
-        if isinstance(wm_data, dict):
-            try:
-                from .world_model import AgentWorldModel
-                self.world_models = {
-                    eid: AgentWorldModel.from_dict(wd)
-                    for eid, wd in wm_data.items()
-                }
-            except Exception:
-                log.exception("apply_snapshot: world_models restore failed")
-
-        # ---- property_dynamics ---------------------------------------
-        pd_data = data.get("property_dynamics")
-        if pd_data:
-            try:
-                from .property_dynamics import PropertyDynamicsEngine
-                self.property_dynamics = PropertyDynamicsEngine.from_dict(pd_data)
-                self.modules["property_dynamics"] = self.property_dynamics
-            except Exception:
-                log.exception("apply_snapshot: property_dynamics restore failed")
-
-        # ---- physics (continuous coupled dynamics) -------------------
-        phys_data = data.get("physics")
-        if phys_data:
-            try:
-                from .physics import PhysicsModel
-                self.physics = PhysicsModel.from_dict(phys_data)
-                self.modules["physics"] = self.physics
-            except Exception:
-                log.exception("apply_snapshot: physics restore failed")
-
-        # ---- Optional managers (only restore if their class is wired) ----
-        for attr, key, mod_name, cls_name in [
-            ("domain_modules", "domain_modules", "domain_module", "DomainModuleManager"),
-            ("controller", "controller", "sim_controller", "SimController"),
-            ("cognition", "cognition", "cognition", "CognitionManager"),
-            ("social", "social", "social", "SocialPlatformManager"),
-        ]:
-            section = data.get(key)
-            if section is None:
-                continue
-            try:
-                module = __import__(f"fg_env_kernel.{mod_name}", fromlist=[cls_name])
-                cls = getattr(module, cls_name)
-                restored = cls.from_dict(section)
-                setattr(self, attr, restored)
-                self.modules[key] = restored
-            except Exception:
-                log.exception("apply_snapshot: %s restore failed", attr)
-
-        # ---- Plugin modules (custom subsystems registered via
-        #      state.register_module) ---------------------------------
-        plugin_snapshot = data.get("plugin_modules") or {}
-        if plugin_snapshot:
-            from .kernel_module import restore_plugin_modules
-            restore_plugin_modules(self.modules, plugin_snapshot)
+        from .snapshot import apply_snapshot
+        apply_snapshot(self, data)
 
     @classmethod
     def from_dict(
@@ -987,6 +830,26 @@ class WorldState:
             if rname not in state.resources:
                 state.resources[rname] = _ResourcePool(resource_type=rtype)
 
+        if schema_provider is not None:
+            state.temporal = copy.deepcopy(schema_provider.temporal)
+            state.temporal.current_round = 0
+            state.temporal.current_phase_index = 0
+            state.temporal.current_turn_index = 0
+            state.temporal.turn_order = []
+            state.relations.relation_types = copy.deepcopy(schema_provider.relations.relation_types)
+            if data.get("domain_modules") is not None:
+                state.domain_modules = getattr(schema_provider, "domain_modules", None)
+            if data.get("crowd_agents") is not None:
+                state.crowd_agents = getattr(schema_provider, "crowd_agents", None)
+            # Registered instances provide classes for reconstruction, never live
+            # state shared with the provider in the returned world.
+            templates = getattr(schema_provider, "modules", {})
+            for name in data.get("plugin_modules", {}):
+                if name in templates:
+                    state.modules[name] = templates[name]
+            if state.domain_modules is not None:
+                domain_ids = {id(module) for module in state.domain_modules._modules.values()}
+                state.modules.update({name: module for name, module in templates.items() if id(module) in domain_ids})
         state.apply_snapshot(data)
         return state
 
@@ -1000,10 +863,11 @@ class WorldState:
             "goals", "skills", "recipes", "negotiations", "roles",
             "polls", "plans", "relations", "property_dynamics",
             "connectors", "domain_modules", "controller", "cognition",
-            "crowd_agents", "social",
+            "crowd_agents", "social", "physics",
         }
+        domain_ids = {id(mod) for mod in self.domain_modules._modules.values()} if self.domain_modules else set()
         plugin_only = {
             k: v for k, v in self.modules.items()
-            if k not in _builtin_keys
+            if k not in _builtin_keys and id(v) not in domain_ids
         }
         return collect_snapshots(plugin_only)

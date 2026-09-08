@@ -6,6 +6,8 @@ resource cycles, disease spread. This module defines the plugin architecture;
 actual domain implementations are registered separately.
 """
 from abc import ABC, abstractmethod
+import copy
+import random
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Type
 
@@ -350,21 +352,36 @@ class DomainModuleManager:
             "modules": {
                 name: mod.to_dict()
                 for name, mod in self._modules.items()
-            }
+            },
+            "rng_states": {
+                name: {attr: rng.getstate() for attr, rng in vars(mod).items() if isinstance(rng, random.Random)}
+                for name, mod in self._modules.items()
+            },
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "DomainModuleManager":
+    def from_dict(cls, data: dict, *, existing: Optional["DomainModuleManager"] = None) -> "DomainModuleManager":
         manager = cls()
         registry = DomainModuleRegistry.get_instance()
         for name, mod_data in data.get("modules", {}).items():
-            mod_class = registry.get(mod_data.get("type", name))
-            if mod_class:
-                module = mod_class(name=name, params=mod_data.get("params", {}))
-                manager._modules[name] = module
-            else:
-                # Fallback: try by name
-                module = registry.create(name, mod_data.get("params", {}))
-                if module:
-                    manager._modules[name] = module
+            current = existing.get_module(name) if existing else None
+            mod_class = type(current) if current is not None else (registry.get(name) or registry.get(mod_data.get("type", name)))
+            if mod_class is None:
+                raise ValueError(f"cannot restore unregistered domain module {name!r}")
+            module = mod_class.from_dict(copy.deepcopy(mod_data))
+            if module.name != name:
+                raise ValueError(f"domain module {name!r} restored with a different name")
+            # Constructors sometimes inject defaults; parameters belong to the snapshot.
+            module._params = copy.deepcopy(mod_data.get("params", {}))
+            manager._modules[name] = module
+        def tuples(value):
+            return tuple(tuples(item) for item in value) if isinstance(value, (list, tuple)) else value
+        for name, states in data.get("rng_states", {}).items():
+            if name not in manager._modules:
+                raise ValueError(f"random state names unknown domain module {name!r}")
+            for attr, rng_state in states.items():
+                rng = getattr(manager._modules[name], attr, None)
+                if not isinstance(rng, random.Random):
+                    raise ValueError(f"cannot restore domain random generator {name}.{attr}")
+                rng.setstate(tuples(rng_state))
         return manager

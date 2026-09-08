@@ -203,7 +203,7 @@ class DerivedRulesEngine:
                 }
                 for r in self._rules
             ],
-            "fired": [list(k) for k in self._fired],
+            "fired": [list(k) for k in sorted(self._fired)],
         }
 
     @classmethod

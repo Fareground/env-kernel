@@ -621,6 +621,17 @@ class SimulationEngine:
                     narrative=change.get("narrative", f"Domain module tick: {change.get('type', 'unknown')}"),
                 )
 
+        # A domain tick may settle the previous decision window. Honor its
+        # declared game-over event before collecting any further paid decisions.
+        # Round-budget and score-at-round conditions still run at round end.
+        for condition in self.termination_conditions:
+            if condition.check_type == "event_triggered" and self._evaluate_condition(condition):
+                self._finish_termination(condition)
+                if self.on_round_end:
+                    self.on_round_end(round_num, self.state)
+                self._emit_event("round_end", narrative=f"Round {round_num} ends.")
+                return
+
         # Process mid-simulation controller: pending injections and narrative directives
         if self.state.controller:
             # Process event injections
@@ -789,24 +800,7 @@ class SimulationEngine:
         # Check termination conditions
         triggered = self._check_termination()
         if triggered:
-            self.terminated_by = triggered.name
-            # Resolve the winner so vizualisations + result screens can
-            # show "X wins" without having to re-evaluate the predicate.
-            winner_info = self._resolve_winner(triggered)
-            self._emit_event(
-                "simulation_terminated",
-                data={
-                    "condition": triggered.name,
-                    "description": triggered.description,
-                    **winner_info,
-                },
-                narrative=(
-                    f"Simulation terminated: {triggered.name} — {triggered.description}"
-                    + (f" — winner: {winner_info.get('winner_name')}"
-                       if winner_info.get('winner_name') else "")
-                ),
-            )
-            self._running = False
+            self._finish_termination(triggered)
 
         # Check world invariants
         if self.invariant_checker and not self._paused:
@@ -825,6 +819,26 @@ class SimulationEngine:
         if self.on_round_end:
             self.on_round_end(round_num, self.state)
         self._emit_event("round_end", narrative=f"Round {round_num} ends.")
+
+    def _finish_termination(self, triggered):
+        self.terminated_by = triggered.name
+        # Resolve the winner so vizualisations + result screens can
+        # show "X wins" without having to re-evaluate the predicate.
+        winner_info = self._resolve_winner(triggered)
+        self._emit_event(
+            "simulation_terminated",
+            data={
+                "condition": triggered.name,
+                "description": triggered.description,
+                **winner_info,
+            },
+            narrative=(
+                f"Simulation terminated: {triggered.name} — {triggered.description}"
+                + (f" — winner: {winner_info.get('winner_name')}"
+                   if winner_info.get('winner_name') else "")
+            ),
+        )
+        self._running = False
 
     def _run_phase(self, phase):
         """Execute a single phase -- handler first, then eligible agents act in order."""

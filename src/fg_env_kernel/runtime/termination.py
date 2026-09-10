@@ -102,10 +102,8 @@ def _evaluate_condition(engine, tc: TerminationCondition) -> bool:
         min_count = tc.params.get("count", 1)
         if not event_type:
             return False
-        total_count = 0
-        for r in range(1, engine.state.temporal.current_round + 1):
-            events = engine.state.event_log.get_round(r)
-            total_count += sum(1 for e in events if e.event_type == event_type)
+        total_count = engine.state.event_log.count_type(
+            event_type, engine.state.temporal.current_round)
         return total_count >= min_count
 
     elif tc.check_type == "compound_and":

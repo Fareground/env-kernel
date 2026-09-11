@@ -109,60 +109,36 @@ def restore_plugin_modules(
     modules: Dict[str, Any],
     plugin_snapshot: Dict[str, Any],
 ) -> None:
-    """Restore plugin modules from a snapshot dict.
-
-    Iterates ``plugin_snapshot`` (the ``"plugin_modules"`` slice of a
-    state.to_dict()) and tries to rebuild each module by calling its
-    ``from_dict`` classmethod. The reconstructed instance replaces the
-    existing entry in ``modules``.
-
-    Modules whose class doesn't expose ``from_dict`` keep their current
-    instance; the engine just attaches the snapshot to the module's
-    ``__snapshot__`` attribute so callers can inspect it.
-
-    Errors are logged and swallowed so one buggy plugin can't fail the
-    whole restore."""
-    import logging
-    for name, data in (plugin_snapshot or {}).items():
-        existing = modules.get(name)
-        if existing is None:
-            # No registered module under that name — keep the snapshot
-            # attached for later inspection but don't construct
-            # arbitrary objects (we have no class to instantiate).
-            continue
-        cls = type(existing)
-        from_dict = getattr(cls, "from_dict", None)
-        if not callable(from_dict):
-            # Module doesn't support reconstruction — leave the live
-            # instance intact and let it stay in sync via other means.
-            continue
+    """Restore all supplied plugins atomically, rejecting missing implementations."""
+    import copy
+    from .snapshot import SnapshotRestoreError, _preserved
+    replacements = {}
+    for name, data in plugin_snapshot.items():
         try:
-            modules[name] = from_dict(data)
-        except Exception:
-            logging.getLogger(__name__).exception(
-                "module[%s].from_dict raised during restore; keeping live instance",
-                name,
-            )
+            existing = modules[name]
+            restored = type(existing).from_dict(copy.deepcopy(data))
+            _preserved(data, restored.to_dict(), f"plugin_modules.{name}")
+            replacements[name] = restored
+        except Exception as exc:
+            raise SnapshotRestoreError(f"Cannot restore plugin_modules.{name}: {exc}") from exc
+    modules.update(replacements)
 
 
 def collect_snapshots(modules: Dict[str, Any]) -> Dict[str, Any]:
-    """Build a ``{name: to_dict()}`` map for snapshot serialization.
+    """Snapshot serializable plugins; serializer failures are never hidden.
 
-    Modules without ``to_dict`` are skipped. Exceptions are swallowed
-    so a buggy plugin can't poison the whole snapshot — that one
-    module's entry is simply missing from the result."""
-    import logging
+    Hook-only modules with no serializer are stateless by contract and skipped.
+    """
+    import copy
     out: Dict[str, Any] = {}
     for name, mod in modules.items():
         td = getattr(mod, "to_dict", None)
         if not callable(td):
             continue
         try:
-            out[name] = td()
-        except Exception:
-            logging.getLogger(__name__).exception(
-                "module[%s].to_dict() raised; omitted from snapshot", name,
-            )
+            out[name] = copy.deepcopy(td())
+        except Exception as exc:
+            raise ValueError(f"Cannot snapshot plugin_modules.{name}: {exc}") from exc
     return out
 
 

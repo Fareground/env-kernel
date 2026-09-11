@@ -168,18 +168,11 @@ class TestPluginModuleRoundTrip:
         snap = populated_world.to_dict()
         assert snap["plugin_modules"]["counter"] == {"count": 42}
 
-        # Restore into a fresh state — must register a placeholder first
-        # so the dispatcher knows which class to use.
         restored = WorldState.from_dict(snap, schema_provider=populated_world)
-        restored.register_module("counter", CountingModule(count=0), replace=True)
-        # Apply just the plugin slice again so the restorer can update it
-        from fg_env_kernel.kernel_module import restore_plugin_modules
-        restore_plugin_modules(restored.modules, snap["plugin_modules"])
         assert restored.get_module("counter").count == 42
 
-    def test_plugin_without_from_dict_keeps_live_instance(self, populated_world):
-        """A module that only has to_dict but no from_dict is left as-is
-        on restore — better than blowing up."""
+    def test_plugin_without_from_dict_is_rejected(self, populated_world):
+        """A write-only plugin cannot be silently mistaken for restored state."""
         class WriteOnly:
             def to_dict(self):
                 return {"data": "snapshotted"}
@@ -194,8 +187,8 @@ class TestPluginModuleRoundTrip:
         new_instance = WriteOnly()
         new_state.register_module("write_only", new_instance)
         from fg_env_kernel.kernel_module import restore_plugin_modules
-        # Should not raise; live instance stays
-        restore_plugin_modules(new_state.modules, snap["plugin_modules"])
+        with pytest.raises(ValueError, match="write_only"):
+            restore_plugin_modules(new_state.modules, snap["plugin_modules"])
         assert new_state.get_module("write_only") is new_instance
 
 
@@ -223,15 +216,12 @@ class TestApplySnapshotInPlace:
         # Schema preserved
         assert "player" in new_state.entity_types
 
-    def test_corrupt_section_does_not_abort_restore(self, populated_world):
-        """A bad slice in one subsystem must not lose ALL state."""
+    def test_corrupt_section_aborts_restore(self, populated_world):
+        """Invalid state must not be silently treated as successfully resumed."""
         snap = populated_world.to_dict()
-        # Corrupt the negotiations slice
         snap["negotiations"] = {"this is not valid": "garbage"}
-        # Should NOT raise; other state should restore fine
-        restored = WorldState.from_dict(snap, schema_provider=populated_world)
-        # Entities still restored
-        assert restored.entities["a"].get("score") == 5
+        with pytest.raises(ValueError, match="negotiations"):
+            WorldState.from_dict(snap, schema_provider=populated_world)
 
 
 class TestSchemaRequirement:

@@ -235,6 +235,13 @@ def compile_template(
                         "the failing action's effects/preconditions."
                     ),
                 ))
+            for effect in report.invalid_effects:
+                result.errors.append(CompileIssue(
+                    severity="error", path="",
+                    message=(f"smoke: invalid {effect.get('operation')} effect on "
+                             f"{effect.get('target')}.{effect.get('field')}: {effect.get('detail')}"),
+                    hint="Fix the value expression and its referenced data before running this world.",
+                ))
             for w in report.warnings:
                 result.warnings.append(CompileIssue(
                     severity="warning", path="", message=f"smoke: {w}",
@@ -277,6 +284,11 @@ def _hint_for_validation_error(err: Mapping[str, Any]) -> str:
     msg = (err.get("msg") or "").lower()
     loc = err.get("loc") or ()
     field = loc[-1] if loc else ""
+
+    if loc and loc[0] == "triggers":
+        return ("Triggers subscribe to an emitted event: {when: 'EVENT_TYPE', effect: [...]} . "
+                "For predicate-based when/then behavior, use derived_rules instead. "
+                "Read the installed TriggerDefinition schema for field types.")
 
     if "field required" in msg:
         return f"Add the missing '{field}' field."

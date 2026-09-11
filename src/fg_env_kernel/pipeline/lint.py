@@ -65,8 +65,86 @@ def lint_template(template: Any, *, registry: Any = None) -> List[CompileIssue]:
     _check_expressions_for_unquoted_barewords(ctx, issues)
     _check_expression_property_references(ctx, issues)
     _check_unknown_spec_fields(ctx, issues)
+    _check_mutation_values(ctx, issues)
+    _check_initial_scalar_values(ctx, issues)
 
     return issues
+
+
+def _check_initial_scalar_values(ctx: "_LintCtx", issues: List[CompileIssue]) -> None:
+    from .initial_values import INITIAL_VALUE_HINT, initial_scalar_error
+
+    types: Dict[str, Dict[str, str]] = {}
+
+    def check(value: Any, kind: str, path: str) -> None:
+        error = initial_scalar_error(value, kind, allow_binding=True)
+        if error:
+            issues.append(CompileIssue(
+                severity="error", path=path, message=error, hint=INITIAL_VALUE_HINT,
+            ))
+
+    for i, entity_type in enumerate(ctx.data.get("entity_types", [])):
+        fields = types.setdefault(entity_type["name"], {})
+        for j, prop in enumerate(entity_type.get("properties", [])):
+            kind = prop.get("type", "float")
+            fields[prop["name"]] = kind
+            check(prop.get("default"), kind, f"entity_types[{i}].properties[{j}].default")
+    for i, entity in enumerate(ctx.data.get("entities", [])):
+        fields = types.get(entity.get("entity_type"), {})
+        for name, value in entity.get("properties", {}).items():
+            check(value, fields.get(name, ""), f"entities[{i}].properties.{name}")
+
+
+def _check_mutation_values(ctx: "_LintCtx", issues: List[CompileIssue]) -> None:
+    """Check literals wherever effects occur, including nested/derived rules.
+
+    Dynamic targets cannot always be typed statically; runtime dispatch performs
+    the same numeric/boolean checks after resolving their actual entity.
+    """
+    from ..effect_values import EffectValueError, expression_source, number, validate_operand
+
+    types = {
+        et["name"]: {p["name"]: p.get("type") for p in et.get("properties", [])}
+        for et in ctx.data.get("entity_types", [])
+    }
+
+    def walk(node: Any, path: str, actor_type: str | None = None, target_type: str | None = None) -> None:
+        if isinstance(node, list):
+            for i, item in enumerate(node):
+                walk(item, f"{path}[{i}]", actor_type, target_type)
+        elif isinstance(node, dict):
+            actor_type = node.get("actor_type", actor_type)
+            target_type = node.get("target_type", target_type)
+            op = node.get("operation")
+            if op in {"set", "add", "subtract", "multiply"} and "value" in node:
+                value = node["value"]
+                target = node.get("target", "actor")
+                et = actor_type if target in {"actor", "$actor"} else (
+                    target_type if target in {"target", "$target"} else ctx.entity_id_to_type.get(target))
+                kind = types.get(et, {}).get(node.get("field"))
+                try:
+                    validate_operand(value, numeric=op != "set")
+                    if op == "set" and expression_source(value) is None:
+                        if kind in {"int", "float"} or target == "physics":
+                            number(value)
+                            if kind == "int" and value != int(value):
+                                raise EffectValueError("integer property requires an integer value")
+                        elif kind == "bool" and not isinstance(value, bool):
+                            raise EffectValueError("boolean property requires a boolean value")
+                except EffectValueError as exc:
+                    issues.append(CompileIssue(
+                        severity="error", path=f"{path}.value", message=str(exc),
+                        hint="Supply a correctly typed literal or a valid dollar expression; missing references fail at runtime.",
+                    ))
+            for key, item in node.items():
+                # A literal payload can itself contain an 'operation' key.
+                # Only conditional values contain nested executable effects.
+                if key != "value" or op == "conditional":
+                    walk(item, f"{path}.{key}" if path else key, actor_type, target_type)
+
+    # Do not inspect data tables or stored snapshots as executable rules.
+    for key in ("actions", "derived_rules", "triggers", "temporal", "decks"):
+        walk(ctx.data.get(key), key)
 
 
 # ---------------------------------------------------------------------------
@@ -685,6 +763,18 @@ def _check_unknown_spec_fields(ctx: _LintCtx, issues: List[CompileIssue]) -> Non
                 if cond is not None:
                     unknown(cond, loader.EffectConditionSpec,
                             f"actions[{i}].{branch}[{j}].condition")
+
+    for i, trigger in enumerate(ctx.data.get("triggers", [])):
+        for j, eff in enumerate(trigger.get("effect", trigger.get("effects", [])) or []):
+            path = f"triggers[{i}].effect[{j}]"
+            unknown(eff, loader.EffectSpec, path)
+            op = eff.get("operation") if isinstance(eff, dict) else None
+            if op and op not in loader._EFFECT_OP_MAP and op not in _custom_effects:
+                issues.append(CompileIssue(
+                    severity="error", path=f"{path}.operation",
+                    message=f"unknown trigger effect operation '{op}' — the effect would be dead",
+                    hint=f"use one of: {sorted(loader._EFFECT_OP_MAP)} or a registered effect",
+                ))
 
     def walk_terminations(items: Any, path: str) -> None:
         for j, tc in enumerate(items or []):

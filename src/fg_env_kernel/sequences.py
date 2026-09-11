@@ -4,6 +4,7 @@ Some actions take multiple rounds to complete (casting, building, negotiating).
 The SequenceTracker manages in-progress sequences per entity.
 """
 from dataclasses import dataclass, field
+import copy
 from typing import Any, Dict, Optional
 
 
@@ -74,9 +75,26 @@ class SequenceTracker:
             entity_id: {
                 "action_name": seq.action_name,
                 "target_id": seq.target_id,
+                "parameters": copy.deepcopy(seq.parameters),
                 "total_rounds": seq.total_rounds,
                 "rounds_completed": seq.rounds_completed,
                 "started_round": seq.started_round,
             }
             for entity_id, seq in self._active.items()
         }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "SequenceTracker":
+        tracker = cls()
+        for entity_id, row in data.items():
+            if "parameters" not in row:
+                raise ValueError("legacy active sequence snapshot lacks its action parameters; cannot safely resume")
+            seq = ActiveSequence(entity_id=entity_id, **copy.deepcopy(row))
+            if type(seq.total_rounds) is not int or seq.total_rounds < 1:
+                raise ValueError("sequence total_rounds must be a positive integer")
+            if type(seq.rounds_completed) is not int or not 0 <= seq.rounds_completed < seq.total_rounds:
+                raise ValueError("invalid active sequence progress")
+            if type(seq.started_round) is not int or seq.started_round < 0 or not isinstance(seq.parameters, dict):
+                raise ValueError("invalid sequence start round or parameters")
+            tracker._active[entity_id] = seq
+        return tracker

@@ -1,5 +1,6 @@
 """Typed relation graph between entities."""
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
+import copy
 from typing import Dict, List, Optional, Tuple
 
 
@@ -195,13 +196,32 @@ class RelationGraph:
         """Serialize to dictionary."""
         return {
             "relation_types": [rt.name for rt in self.relation_types.values()],
+            "definitions": [asdict(rt) for rt in self.relation_types.values()],
+            "triggered_thresholds": [list(key) for key in sorted(self._triggered_thresholds)],
             "edges": [
                 {
                     "from": e.from_entity,
                     "to": e.to_entity,
                     "type": e.relation_type,
                     "value": e.value,
+                    "metadata": copy.deepcopy(e.metadata),
                 }
                 for e in self._edges.values()
             ],
         }
+
+    @classmethod
+    def from_dict(cls, data: dict, *, definitions: Optional[Dict[str, RelationType]] = None) -> "RelationGraph":
+        graph = cls()
+        graph.relation_types = copy.deepcopy(definitions or {})
+        if "definitions" in data:
+            graph.relation_types = {}
+            for row in data["definitions"]:
+                definition = copy.deepcopy(row)
+                definition["thresholds"] = [RelationThreshold(**item) for item in definition.get("thresholds", [])]
+                graph.register_relation_type(RelationType(**definition))
+        for edge in data.get("edges", []):
+            item = RelationEdge(edge["from"], edge["to"], edge["type"], edge.get("value", 0), copy.deepcopy(edge.get("metadata", {})))
+            graph._edges[(item.from_entity, item.to_entity, item.relation_type)] = item
+        graph._triggered_thresholds = {tuple(row) for row in data.get("triggered_thresholds", [])}
+        return graph

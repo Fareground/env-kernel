@@ -457,7 +457,7 @@ def run_agent_turn(engine, entity_id: str):
             return
 
     # 5b. Check target-side preconditions (IS_ADJACENT, SAME_FACTION, etc.)
-    if not engine._check_target_preconditions(entity, target, action_def):
+    if not engine._check_target_preconditions(entity, target, action_def, action_instance.parameters):
         engine._emit_event(
             "action_failed",
             actor_id=entity_id,

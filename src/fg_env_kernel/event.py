@@ -1,7 +1,8 @@
 """Simulation event tracking."""
+from collections import Counter, deque
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Deque, Dict, List, Optional
 
 
 @dataclass
@@ -40,19 +41,73 @@ class EventLog:
     simulations (where each event is already pushed out via the engine's
     ``on_event`` callback), pass ``max_events`` to cap in-memory retention to
     the most recent N events and bound memory growth.
+
+    Retained events are also indexed by round and by (type, round), so the
+    per-round reads and per-type counts that termination checks make every
+    round cost the size of the answer rather than the whole history. ``emit``
+    and trimming keep the index current; ``_rebuild_index`` recomputes it if
+    ``_events`` is ever replaced wholesale.
     """
 
     def __init__(self, max_events: Optional[int] = None):
         self._events: List[SimEvent] = []
         self._max_events = max_events
+        self._rebuild_index()
+
+    # -- index -------------------------------------------------------------
+
+    def _rebuild_index(self) -> None:
+        """Recompute every index from ``_events``."""
+        self._by_round: Dict[Any, Deque[SimEvent]] = {}
+        self._type_rounds: Dict[str, Counter] = {}
+        self._type_counted: Dict[str, int] = {}
+        self._type_max_round: Dict[str, int] = {}
+        for event in self._events:
+            self._index(event)
+
+    def _index(self, event: SimEvent) -> None:
+        self._by_round.setdefault(event.round_number, deque()).append(event)
+        rnd = _counted_round(event.round_number)
+        if rnd is None:
+            return
+        etype = event.event_type
+        self._type_rounds.setdefault(etype, Counter())[rnd] += 1
+        self._type_counted[etype] = self._type_counted.get(etype, 0) + 1
+        if rnd > self._type_max_round.get(etype, 0):
+            self._type_max_round[etype] = rnd
+
+    def _unindex_oldest(self, event: SimEvent) -> None:
+        """Drop ``event`` (the oldest retained event) from the index."""
+        bucket = self._by_round[event.round_number]
+        bucket.popleft()
+        if not bucket:
+            del self._by_round[event.round_number]
+        rnd = _counted_round(event.round_number)
+        if rnd is None:
+            return
+        etype = event.event_type
+        rounds = self._type_rounds[etype]
+        rounds[rnd] -= 1
+        if not rounds[rnd]:
+            del rounds[rnd]
+        self._type_counted[etype] -= 1
+        # _type_max_round may now overstate the latest round; count_type
+        # then takes its exact-sum path, so counts stay correct.
+
+    # -- writes ------------------------------------------------------------
 
     def emit(self, event: SimEvent):
         """Append an event (trimming oldest if a cap is set)."""
         self._events.append(event)
+        self._index(event)
         if self._max_events is not None and len(self._events) > self._max_events:
             # Drop oldest in a batch to keep this amortized O(1).
             overflow = len(self._events) - self._max_events
+            for dropped in self._events[:overflow]:
+                self._unindex_oldest(dropped)
             del self._events[:overflow]
+
+    # -- reads -------------------------------------------------------------
 
     def get_all(self) -> List[SimEvent]:
         """Get all events."""
@@ -60,7 +115,24 @@ class EventLog:
 
     def get_round(self, round_number: int) -> List[SimEvent]:
         """Get events for a specific round."""
-        return [e for e in self._events if e.round_number == round_number]
+        return list(self._by_round.get(round_number, ()))
+
+    def count_type(self, event_type: str, through_round: int) -> int:
+        """Count retained ``event_type`` events stamped in rounds
+        ``1..through_round`` inclusive (round-0 setup events excluded).
+
+        Constant time when ``through_round`` is at or past the latest round
+        the type was seen in (a check at the current round); otherwise an
+        exact sum over that type's distinct rounds."""
+        counted = self._type_counted.get(event_type, 0)
+        if not counted:
+            return 0
+        if through_round >= self._type_max_round.get(event_type, 0):
+            return counted
+        return sum(
+            n for rnd, n in self._type_rounds[event_type].items()
+            if rnd <= through_round
+        )
 
     def visible_for(self, observer_id: str) -> List[SimEvent]:
         """Events ``observer_id`` may see.
@@ -95,3 +167,16 @@ class EventLog:
     def to_transcript(self) -> List[dict]:
         """Export full transcript as list of dicts."""
         return [e.to_dict() for e in self._events]
+
+
+def _counted_round(round_number: Any) -> Optional[int]:
+    """The positive integer round an event counts toward, or None.
+
+    Matches what a ``range(1, current + 1)`` scan comparing with ``==`` would
+    count: ``3`` and ``3.0`` are round 3; ``0``, ``2.5`` and ``None`` count
+    toward no round."""
+    if not isinstance(round_number, (int, float)) or round_number < 1:
+        return None
+    if isinstance(round_number, float) and not round_number.is_integer():
+        return None
+    return int(round_number)

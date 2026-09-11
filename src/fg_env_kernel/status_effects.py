@@ -4,7 +4,9 @@ Status effects alter entity capabilities: blocking actions, modifying
 properties during resolution, and applying per-round tick effects
 (damage-over-time, healing, etc.).
 """
-from dataclasses import dataclass, field
+import copy
+from dataclasses import asdict, dataclass, field
+from enum import Enum
 from typing import Dict, List, Optional
 
 from .action import Effect
@@ -22,6 +24,33 @@ class StatusEffectDefinition:
     stackable: bool = False
     max_stacks: int = 1
     narrative_tag: str = ""                  # e.g., "writhing in pain"
+
+    def to_dict(self) -> dict:
+        def primitive(value):
+            if isinstance(value, Enum):
+                return value.value
+            if isinstance(value, dict):
+                return {key: primitive(item) for key, item in value.items()}
+            if isinstance(value, list):
+                return [primitive(item) for item in value]
+            return value
+        data = primitive(asdict(self))
+        for effect, raw in zip(self.tick_effects, data["tick_effects"]):
+            supplied = effect.value_supplied if effect.value_supplied is not None else effect.value is not None
+            raw.pop("value_supplied", None)
+            if not supplied:
+                raw.pop("value", None)
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "StatusEffectDefinition":
+        from .pipeline.loader import _parse_effects
+        definition = cls(**{**data, "tick_effects": _parse_effects(data.get("tick_effects", []))})
+        for name, minimum in (("duration", 0), ("max_stacks", 1)):
+            value = getattr(definition, name)
+            if type(value) is not int or value < minimum:
+                raise ValueError(f"status definition {name} must be an integer >= {minimum}")
+        return definition
 
 
 @dataclass
@@ -156,7 +185,29 @@ class StatusEffectTracker:
                     "remaining_rounds": ase.remaining_rounds,
                     "stacks": ase.stacks,
                     "source": ase.source_entity,
+                    "applied_round": ase.applied_round,
+                    "definition": ase.definition.to_dict(),
                 }
                 for ase in effects
             ]
         return result
+
+    @classmethod
+    def from_dict(cls, data: dict, *, definitions: Optional[Dict[str, StatusEffectDefinition]] = None) -> "StatusEffectTracker":
+        tracker = cls()
+        for entity_id, rows in data.items():
+            restored = []
+            for row in rows:
+                definition = StatusEffectDefinition.from_dict(row["definition"]) if "definition" in row else copy.deepcopy((definitions or {}).get(row["name"]))
+                if definition is None or definition.name != row["name"]:
+                    raise ValueError(f"missing or inconsistent status definition {row.get('name')!r}")
+                remaining, stacks = row["remaining_rounds"], row["stacks"]
+                applied = row.get("applied_round", 0)
+                if type(remaining) is not int or remaining < 0 or type(stacks) is not int or not 1 <= stacks <= definition.max_stacks:
+                    raise ValueError("invalid status duration or stack count")
+                if type(applied) is not int or applied < 0:
+                    raise ValueError("invalid status applied round")
+                restored.append(ActiveStatusEffect(definition=definition, source_entity=row.get("source"),
+                                                   remaining_rounds=remaining, stacks=stacks, applied_round=applied))
+            tracker._effects[entity_id] = restored
+        return tracker

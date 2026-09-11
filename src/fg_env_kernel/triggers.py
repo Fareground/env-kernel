@@ -69,17 +69,20 @@ class TriggerEngine:
 
     @classmethod
     def from_schema(cls, schema_triggers: List[Dict[str, Any]]) -> "TriggerEngine":
+        # Validate direct loader callers too; do not coerce a condition object
+        # to an event-name string or silently skip a malformed subscription.
+        from .pipeline.loader import TriggerDefinition
+
         specs: List[TriggerSpec] = []
         for i, t in enumerate(schema_triggers or []):
-            if not isinstance(t, dict) or not t.get("when"):
-                continue
+            declaration = TriggerDefinition.model_validate(t)
             specs.append(TriggerSpec(
-                when=str(t["when"]),
-                effect=list(t.get("effect") or t.get("effects") or []),
-                filter=t.get("filter"),
-                cooldown_rounds=int(t.get("cooldown_rounds", 0)),
-                once=bool(t.get("once", False)),
-                name=t.get("name") or f"trigger_{i}",
+                when=declaration.when,
+                effect=[effect.model_dump() for effect in declaration.effect],
+                filter=declaration.filter,
+                cooldown_rounds=declaration.cooldown_rounds,
+                once=declaration.once,
+                name=declaration.name or f"trigger_{i}",
             ))
         return cls(triggers=specs)
 

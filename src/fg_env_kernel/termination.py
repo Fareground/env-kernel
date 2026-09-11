@@ -384,10 +384,7 @@ def _check_event_triggered(state, params, rng):
     min_count = params.get("count", 1)
     if not event_type:
         return False
-    total = 0
-    for r in range(1, state.temporal.current_round + 1):
-        events = state.event_log.get_round(r)
-        total += sum(1 for e in events if e.event_type == event_type)
+    total = state.event_log.count_type(event_type, state.temporal.current_round)
     return total >= min_count
 
 

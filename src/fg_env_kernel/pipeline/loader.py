@@ -41,7 +41,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 if TYPE_CHECKING:
     from ..continuous_time import ContinuousTemporalModel
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, field_validator, model_serializer, model_validator
 
 from ..action import (
     ActionDefinition,
@@ -143,6 +143,63 @@ class EffectSpec(BaseModel):
     condition: Optional[EffectConditionSpec] = None
     scale_by_magnitude: bool = False
 
+    @field_validator("value")
+    @classmethod
+    def validate_value(cls, value, info):
+        from ..effect_values import validate_operand
+        operation = info.data.get("operation")
+        if operation in {"set", "add", "subtract", "multiply"}:
+            validate_operand(value, numeric=operation != "set")
+        return value
+
+    @model_serializer(mode="wrap")
+    def preserve_missing_value(self, handler):
+        data = handler(self)
+        if "value" not in self.model_fields_set:
+            data.pop("value", None)
+        return data
+
+
+class TriggerDefinition(BaseModel):
+    """Event subscription, not a predicate rule. Exported to authoring tools.
+
+    Predicate-based ``when`` / ``then`` belongs in derived_rules. Previously
+    arbitrary dictionaries here could compile and silently do nothing.
+    Keep the historically supported ``effects`` alias, normalized to effect.
+    """
+    model_config = ConfigDict(extra="forbid")
+    when: StrictStr = Field(min_length=1, description="Exact emitted event type, e.g. round_end; not an expression or condition object.")
+    effect: List[EffectSpec] = Field(min_length=1, validation_alias=AliasChoices("effect", "effects"))
+    filter: Optional[Dict[str, Any]] = None
+    cooldown_rounds: StrictInt = Field(default=0, ge=0)
+    once: StrictBool = False
+    name: Optional[str] = None
+    description: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def legacy_effect_operations(cls, value):
+        if not isinstance(value, dict):
+            return value
+        value = copy.deepcopy(value)
+        for key in ("effect", "effects"):
+            effects = value.get(key)
+            if not isinstance(effects, list):
+                continue
+            for effect in effects:
+                if isinstance(effect, dict) and "op" in effect:
+                    if "operation" in effect and effect["op"] != effect["operation"]:
+                        raise ValueError("Trigger effect has conflicting operation and op values")
+                    effect["operation"] = effect.pop("op")
+        return value
+
+    @field_validator("when")
+    @classmethod
+    def nonempty_event(cls, value):
+        if not value.strip():
+            raise ValueError("Trigger when must name an emitted event; use derived_rules for predicates")
+        return value
+
 
 class ActionSpec(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -231,7 +288,7 @@ class WorldTemplate(BaseModel):
 
     # Rules layer
     actions: List[ActionSpec] = Field(default_factory=list)
-    triggers: List[Dict[str, Any]] = Field(default_factory=list)
+    triggers: List[TriggerDefinition] = Field(default_factory=list)
     derived_rules: List[Dict[str, Any]] = Field(default_factory=list)
     termination_conditions: List[TerminationSpec] = Field(default_factory=list)
     domain_modules: List[DomainModuleSpec] = Field(default_factory=list)
@@ -323,10 +380,16 @@ def build_world_state(
     # the rules. The agent's chain-of-thought references these for any
     # action choice. Stored as a plain dict on state for easy perception
     # assembly.
+    private_information = any(prop.get("hidden") is True
+        for entity_type in schema.get("entity_types") or []
+        for prop in entity_type.get("properties") or [])
+    participant_rules = schema.get("participant_briefing")
+    if participant_rules is None and not private_information:
+        participant_rules = schema.get("rules", "")
     state._world_brief = {  # type: ignore[attr-defined]  # loader-injected runtime attr, read via getattr()
         "name": schema.get("name", ""),
-        "description": schema.get("description", ""),
-        "rules": schema.get("rules", ""),
+        "description": "" if private_information else schema.get("description", ""),
+        "rules": participant_rules if isinstance(participant_rules, str) else "",
     }
     # Derived rules — the unified inference layer. Stored on state so
     # the engine's tick loop can run them after agent turns.
@@ -345,7 +408,7 @@ def build_world_state(
     _apply_relation_types(state, schema.get("relation_types") or [])
     _apply_visibility_rules(state, schema.get("visibility_rules") or [])
     _apply_actions(state, schema.get("actions") or [], registry=registry)
-    _apply_entities(state, schema.get("entities") or [])
+    _apply_entities(state, schema.get("entities") or [], schema.get("entity_types") or [])
     _apply_resource_holdings(state, schema)
     _apply_initial_relations(state, schema.get("initial_relations") or [])
     _apply_factions(state, schema.get("factions") or [])
@@ -729,6 +792,7 @@ def _parse_effects(
             operation=operation,
             field=eff.get("field"),
             value=eff.get("value"),
+            value_supplied="value" in eff,
             resource=eff.get("resource"),
             relation_type=eff.get("relation_type"),
             description=eff.get("description", ""),
@@ -769,7 +833,17 @@ def _resolve_initial(value: Any, state: WorldState, path: str) -> Any:
     return value
 
 
-def _apply_entities(state: WorldState, specs: List[Dict[str, Any]]) -> None:
+def _apply_entities(
+    state: WorldState, specs: List[Dict[str, Any]], entity_types: List[Dict[str, Any]],
+) -> None:
+    from .initial_values import INITIAL_VALUE_HINT, initial_scalar_error
+
+    # Check the declared contract, not the legacy FLOAT fallback used for
+    # extension types such as 'json'. Those payloads are intentionally literal.
+    declared_types = {
+        et["name"]: {p["name"]: p.get("type", "float") for p in et.get("properties", [])}
+        for et in entity_types
+    }
     for ent in specs:
         # Merge EntityType defaults under explicit per-entity overrides.
         # Without this, declaring an entity with partial properties
@@ -786,6 +860,13 @@ def _apply_entities(state: WorldState, specs: List[Dict[str, Any]]) -> None:
         props = _resolve_initial(props, state, ent["id"])
         if et is not None:
             for pschema in et.properties:
+                kind = declared_types.get(ent["entity_type"], {}).get(pschema.name, "")
+                error = initial_scalar_error(props.get(pschema.name), kind)
+                if error:
+                    raise ValueError(
+                        f"Invalid initial input at {ent['id']}.{pschema.name}: {error}. "
+                        f"{INITIAL_VALUE_HINT}"
+                    )
                 if pschema.name in bound and not pschema.validate(props.get(pschema.name)):
                     raise ValueError(f"Invalid runtime input for {ent['id']}.{pschema.name}; check its type and bounds")
         if et is not None:

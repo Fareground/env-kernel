@@ -408,7 +408,7 @@ def build_world_state(
     _apply_relation_types(state, schema.get("relation_types") or [])
     _apply_visibility_rules(state, schema.get("visibility_rules") or [])
     _apply_actions(state, schema.get("actions") or [], registry=registry)
-    _apply_entities(state, schema.get("entities") or [])
+    _apply_entities(state, schema.get("entities") or [], schema.get("entity_types") or [])
     _apply_resource_holdings(state, schema)
     _apply_initial_relations(state, schema.get("initial_relations") or [])
     _apply_factions(state, schema.get("factions") or [])
@@ -833,9 +833,17 @@ def _resolve_initial(value: Any, state: WorldState, path: str) -> Any:
     return value
 
 
-def _apply_entities(state: WorldState, specs: List[Dict[str, Any]]) -> None:
+def _apply_entities(
+    state: WorldState, specs: List[Dict[str, Any]], entity_types: List[Dict[str, Any]],
+) -> None:
     from .initial_values import INITIAL_VALUE_HINT, initial_scalar_error
 
+    # Check the declared contract, not the legacy FLOAT fallback used for
+    # extension types such as 'json'. Those payloads are intentionally literal.
+    declared_types = {
+        et["name"]: {p["name"]: p.get("type", "float") for p in et.get("properties", [])}
+        for et in entity_types
+    }
     for ent in specs:
         # Merge EntityType defaults under explicit per-entity overrides.
         # Without this, declaring an entity with partial properties
@@ -852,7 +860,8 @@ def _apply_entities(state: WorldState, specs: List[Dict[str, Any]]) -> None:
         props = _resolve_initial(props, state, ent["id"])
         if et is not None:
             for pschema in et.properties:
-                error = initial_scalar_error(props.get(pschema.name), pschema.type.value)
+                kind = declared_types.get(ent["entity_type"], {}).get(pschema.name, "")
+                error = initial_scalar_error(props.get(pschema.name), kind)
                 if error:
                     raise ValueError(
                         f"Invalid initial input at {ent['id']}.{pschema.name}: {error}. "

@@ -54,6 +54,7 @@ def test_skipped_lint_and_direct_loader_cannot_bypass_scalar_validation(default)
     ("int", 0), ("int", -1), ("float", 2.5), ("float", 10),
     ("bool", False), ("int", None), ("string", "literal $starting_stock"),
     ("list", [{"expr": "stored data, not executable code"}]),
+    ("json", {"expr": "stored data, not executable code"}), ("json", []),
 ])
 def test_valid_literals_and_literal_payloads_are_preserved(kind, value):
     result = compile_template(world(kind, value))

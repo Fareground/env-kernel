@@ -91,6 +91,52 @@ def test_external_event_history_is_required_and_restored_before_next_decision():
     assert restored._rng.random() == source._rng.random()
 
 
+@pytest.mark.parametrize('include_events', [False, True])
+def test_checkpoint_detaches_world_engine_and_external_state_in_both_directions(include_events):
+    engine = make_engine()
+    engine.step()
+    engine.state.entities['a'].properties['nested'] = {'values': [1]}
+    external = {'memory': {'facts': ['original']}}
+    saved = engine.checkpoint(external_state=external, include_events=include_events)
+    before = copy.deepcopy(saved)
+
+    # Live execution and caller-owned memory cannot rewrite a saved boundary.
+    engine.state.entities['a'].properties['nested']['values'].append(2)
+    external['memory']['facts'].append('later')
+    engine.step()
+    assert saved == before
+
+    # Nor can a consumer editing a checkpoint alter the engine or another one.
+    live_before = engine.checkpoint(external_state=external, include_events=include_events)
+    saved['world']['entities']['a']['properties']['nested']['values'].append(3)
+    saved['world']['action_history']['history']['a'][0]['action'] = 'changed'
+    saved['execution']['triggers']['last_fired']['changed'] = 999
+    saved['execution']['trends']['history'].clear()
+    saved['external_state']['memory']['facts'].append('changed')
+    if include_events:
+        saved['event_log']['events'].clear()
+    assert engine.checkpoint(external_state=external, include_events=include_events) == live_before
+
+
+def test_checkpoint_does_not_deepcopy_already_detached_world(monkeypatch):
+    engine = make_engine()
+    engine.step()
+    detached_world = engine.state.to_dict()
+    calls = []
+    original_deepcopy = copy.deepcopy
+
+    def track_deepcopy(value, *args, **kwargs):
+        calls.append(value)
+        return original_deepcopy(value, *args, **kwargs)
+
+    monkeypatch.setattr(engine.state, 'to_dict', lambda: detached_world)
+    monkeypatch.setattr(copy, 'deepcopy', track_deepcopy)
+    checkpoint = engine.checkpoint()
+    assert checkpoint['world'] is detached_world
+    assert all(value is not detached_world for value in calls)
+    assert all(not isinstance(value, dict) or value.get('world') is not detached_world for value in calls)
+
+
 def test_failed_restore_does_not_mutate_live_engine_or_world():
     engine = make_engine()
     engine.step()

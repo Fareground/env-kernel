@@ -73,9 +73,12 @@ def capture(engine: Any, *, external_state=None, include_events=True) -> dict:
     domain = engine.state.domain_modules
     shared_rng = [[name, attr] for name, module in (domain._modules.items() if domain else [])
                   for attr, value in vars(module).items() if value is engine._rng]
-    return copy.deepcopy({
+    # WorldState.to_dict already detaches every nested subsystem. Copy the
+    # engine/external payload separately so growing world history is not walked
+    # and allocated a second time at every checkpoint boundary.
+    world = engine.state.to_dict()
+    checkpoint = copy.deepcopy({
         'format': FORMAT,
-        'world': engine.state.to_dict(),
         'external_state': external_state,
         'execution': {
             'seed': engine.seed, 'rng_state': engine._rng.getstate(), 'max_rounds': engine.max_rounds,
@@ -99,6 +102,8 @@ def capture(engine: Any, *, external_state=None, include_events=True) -> dict:
                       'count': len(engine.state.event_log),
                       'events': engine.state.event_log.to_transcript() if include_events else None},
     })
+    checkpoint['world'] = world
+    return checkpoint
 
 
 def restore(engine: Any, checkpoint: dict, *, event_history=None) -> None:

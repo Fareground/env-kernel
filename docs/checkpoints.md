@@ -30,6 +30,14 @@ may use `include_events=False` and supply the exact retained event prefix throug
 error. Checkpoints are private; do not send them in spectator or public replay
 payloads.
 
+The returned checkpoint is detached from both the live world and caller-owned
+`external_state`: changing either cannot rewrite a saved boundary, and editing a
+checkpoint cannot change a running engine. Capture reuses the already-detached
+`WorldState.to_dict()` result rather than deep-copying it again. This avoids a
+redundant full-history traversal; it does not bound checkpoint size or make
+capture independent of accumulated action history. Full action history remains
+present, and the `fg-execution-v1` format and restore contract are unchanged.
+
 Fareground stores checkpoints at saved round boundaries, with ordinal-addressed
 transcript records and deduplicated shared agent caches. A fork without a seed
 override continues the saved RNG stream and extends the budget by the requested

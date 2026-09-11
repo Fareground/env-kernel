@@ -739,6 +739,18 @@ def _check_unknown_spec_fields(ctx: _LintCtx, issues: List[CompileIssue]) -> Non
                     unknown(cond, loader.EffectConditionSpec,
                             f"actions[{i}].{branch}[{j}].condition")
 
+    for i, trigger in enumerate(ctx.data.get("triggers", [])):
+        for j, eff in enumerate(trigger.get("effect", trigger.get("effects", [])) or []):
+            path = f"triggers[{i}].effect[{j}]"
+            unknown(eff, loader.EffectSpec, path)
+            op = eff.get("operation") if isinstance(eff, dict) else None
+            if op and op not in loader._EFFECT_OP_MAP and op not in _custom_effects:
+                issues.append(CompileIssue(
+                    severity="error", path=f"{path}.operation",
+                    message=f"unknown trigger effect operation '{op}' — the effect would be dead",
+                    hint=f"use one of: {sorted(loader._EFFECT_OP_MAP)} or a registered effect",
+                ))
+
     def walk_terminations(items: Any, path: str) -> None:
         for j, tc in enumerate(items or []):
             unknown(tc, loader.TerminationSpec, f"{path}[{j}]")

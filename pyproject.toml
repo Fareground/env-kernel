@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "fg-env-kernel"
-version = "0.2.0.post9"
+version = "0.2.0.post10"
 description = "Game-agnostic simulation kernel for building agent environments."
 readme = "README.md"
 requires-python = ">=3.11"

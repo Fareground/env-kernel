@@ -834,6 +834,8 @@ def _resolve_initial(value: Any, state: WorldState, path: str) -> Any:
 
 
 def _apply_entities(state: WorldState, specs: List[Dict[str, Any]]) -> None:
+    from .initial_values import INITIAL_VALUE_HINT, initial_scalar_error
+
     for ent in specs:
         # Merge EntityType defaults under explicit per-entity overrides.
         # Without this, declaring an entity with partial properties
@@ -850,6 +852,12 @@ def _apply_entities(state: WorldState, specs: List[Dict[str, Any]]) -> None:
         props = _resolve_initial(props, state, ent["id"])
         if et is not None:
             for pschema in et.properties:
+                error = initial_scalar_error(props.get(pschema.name), pschema.type.value)
+                if error:
+                    raise ValueError(
+                        f"Invalid initial input at {ent['id']}.{pschema.name}: {error}. "
+                        f"{INITIAL_VALUE_HINT}"
+                    )
                 if pschema.name in bound and not pschema.validate(props.get(pschema.name)):
                     raise ValueError(f"Invalid runtime input for {ent['id']}.{pschema.name}; check its type and bounds")
         if et is not None:

@@ -45,9 +45,10 @@ def export_kernel_contract() -> Dict[str, Any]:
       - ``template_schema``   — JSON Schema for WorldTemplate
       - ``live_capabilities`` — registry-driven name lists
     """
+    from .authoring_shapes import enrich_authoring_shapes
     return {
         "version": CONTRACT_VERSION,
-        "template_schema": WorldTemplate.model_json_schema(),
+        "template_schema": enrich_authoring_shapes(WorldTemplate.model_json_schema()),
         "live_capabilities": _build_live_capabilities(),
         "notes": _contract_notes(),
     }
@@ -113,8 +114,9 @@ def _contract_notes() -> List[str]:
         "(precondition, effect.condition, termination). Single grammar, fewer pitfalls.",
         "Built-in effect operations and EVERY registered custom op live in "
         "`live_capabilities.effect_operations` — there is no hidden vocabulary.",
-        "Always include at least one entity_type with role='agent' and at least one "
-        "action whose actor_type matches it — otherwise nobody can act.",
+        "Use role='agent' only for decision-making participants, with matching actions. "
+        "Autonomous systems use role='object' and executable derived rules, triggers, "
+        "physics or domain modules; they do not need dummy decision agents.",
         "termination_conditions are optional but recommended; without one the game "
         "only stops at engine.max_rounds.",
         "Domain modules (chess, monopoly, prediction_market, …) are referenced by "

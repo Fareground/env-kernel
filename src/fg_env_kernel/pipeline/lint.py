@@ -66,8 +66,33 @@ def lint_template(template: Any, *, registry: Any = None) -> List[CompileIssue]:
     _check_expression_property_references(ctx, issues)
     _check_unknown_spec_fields(ctx, issues)
     _check_mutation_values(ctx, issues)
+    _check_initial_scalar_values(ctx, issues)
 
     return issues
+
+
+def _check_initial_scalar_values(ctx: "_LintCtx", issues: List[CompileIssue]) -> None:
+    from .initial_values import INITIAL_VALUE_HINT, initial_scalar_error
+
+    types: Dict[str, Dict[str, str]] = {}
+
+    def check(value: Any, kind: str, path: str) -> None:
+        error = initial_scalar_error(value, kind, allow_binding=True)
+        if error:
+            issues.append(CompileIssue(
+                severity="error", path=path, message=error, hint=INITIAL_VALUE_HINT,
+            ))
+
+    for i, entity_type in enumerate(ctx.data.get("entity_types", [])):
+        fields = types.setdefault(entity_type["name"], {})
+        for j, prop in enumerate(entity_type.get("properties", [])):
+            kind = prop.get("type", "float")
+            fields[prop["name"]] = kind
+            check(prop.get("default"), kind, f"entity_types[{i}].properties[{j}].default")
+    for i, entity in enumerate(ctx.data.get("entities", [])):
+        fields = types.get(entity.get("entity_type"), {})
+        for name, value in entity.get("properties", {}).items():
+            check(value, fields.get(name, ""), f"entities[{i}].properties.{name}")
 
 
 def _check_mutation_values(ctx: "_LintCtx", issues: List[CompileIssue]) -> None:

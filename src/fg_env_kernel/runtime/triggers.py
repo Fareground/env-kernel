@@ -18,7 +18,6 @@ import logging
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from ..event import SimEvent
-from .engine import _coerce_effects
 
 if TYPE_CHECKING:
     from ..triggers import TriggerSpec
@@ -156,6 +155,7 @@ def _emit_event(engine,
                     engine._cascade_tls.depth = depth
         except Exception:
             logger.exception("trigger evaluation failed for event %s", event_type)
+            raise
 
 def _fire_trigger(engine,
     spec: "TriggerSpec",
@@ -168,9 +168,10 @@ def _fire_trigger(engine,
     can reference `$event.field` (mapped to params here)."""
     actor = engine.state.get_entity(actor_id) if actor_id else None
     target = engine.state.get_entity(target_id) if target_id else None
-    effects = _coerce_effects(spec.effect, engine.registry)
-    if not effects:
-        return
+    # The permissive generic coercer drops unknown operations and conditions.
+    # Triggers use the same strict parser as authored action effects.
+    from ..pipeline.loader import _parse_effects
+    effects = _parse_effects(spec.effect, registry=engine.registry)
     # We pass `event_data` through the `params` channel so $params.X
     # in trigger effects can read the triggering event's payload.
     # Also stash actor_id into params['actor'] for convenience.
@@ -181,8 +182,9 @@ def _fire_trigger(engine,
         engine.triggers.record_fired(
             spec, actor_id, engine.state.temporal.current_round,
         )
-    except Exception:
+    except Exception as exc:
         logger.exception("trigger fire failed: %s", spec.name)
+        raise RuntimeError(f"Trigger {spec.name!r} failed: {exc}") from exc
 
 
 __all__ = ["emit_event", "_emit_event", "_fire_trigger", "_entities_snapshot"]

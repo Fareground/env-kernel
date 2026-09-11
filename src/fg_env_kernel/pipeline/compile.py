@@ -285,6 +285,11 @@ def _hint_for_validation_error(err: Mapping[str, Any]) -> str:
     loc = err.get("loc") or ()
     field = loc[-1] if loc else ""
 
+    if loc and loc[0] == "triggers":
+        return ("Triggers subscribe to an emitted event: {when: 'EVENT_TYPE', effect: [...]} . "
+                "For predicate-based when/then behavior, use derived_rules instead. "
+                "Read the installed TriggerDefinition schema for field types.")
+
     if "field required" in msg:
         return f"Add the missing '{field}' field."
     if "extra inputs" in msg or "extra fields" in msg:

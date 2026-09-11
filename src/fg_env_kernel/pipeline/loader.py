@@ -41,7 +41,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 if TYPE_CHECKING:
     from ..continuous_time import ContinuousTemporalModel
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, field_validator, model_serializer, model_validator
 
 from ..action import (
     ActionDefinition,
@@ -160,6 +160,47 @@ class EffectSpec(BaseModel):
         return data
 
 
+class TriggerDefinition(BaseModel):
+    """Event subscription, not a predicate rule. Exported to authoring tools.
+
+    Predicate-based ``when`` / ``then`` belongs in derived_rules. Previously
+    arbitrary dictionaries here could compile and silently do nothing.
+    Keep the historically supported ``effects`` alias, normalized to effect.
+    """
+    model_config = ConfigDict(extra="forbid")
+    when: StrictStr = Field(min_length=1, description="Exact emitted event type, e.g. round_end; not an expression or condition object.")
+    effect: List[EffectSpec] = Field(min_length=1, validation_alias=AliasChoices("effect", "effects"))
+    filter: Optional[Dict[str, Any]] = None
+    cooldown_rounds: StrictInt = Field(default=0, ge=0)
+    once: StrictBool = False
+    name: Optional[str] = None
+    description: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def legacy_effect_operations(cls, value):
+        if not isinstance(value, dict):
+            return value
+        value = copy.deepcopy(value)
+        for key in ("effect", "effects"):
+            effects = value.get(key)
+            if not isinstance(effects, list):
+                continue
+            for effect in effects:
+                if isinstance(effect, dict) and "op" in effect:
+                    if "operation" in effect and effect["op"] != effect["operation"]:
+                        raise ValueError("Trigger effect has conflicting operation and op values")
+                    effect["operation"] = effect.pop("op")
+        return value
+
+    @field_validator("when")
+    @classmethod
+    def nonempty_event(cls, value):
+        if not value.strip():
+            raise ValueError("Trigger when must name an emitted event; use derived_rules for predicates")
+        return value
+
+
 class ActionSpec(BaseModel):
     model_config = ConfigDict(extra="allow")
     name: str
@@ -247,7 +288,7 @@ class WorldTemplate(BaseModel):
 
     # Rules layer
     actions: List[ActionSpec] = Field(default_factory=list)
-    triggers: List[Dict[str, Any]] = Field(default_factory=list)
+    triggers: List[TriggerDefinition] = Field(default_factory=list)
     derived_rules: List[Dict[str, Any]] = Field(default_factory=list)
     termination_conditions: List[TerminationSpec] = Field(default_factory=list)
     domain_modules: List[DomainModuleSpec] = Field(default_factory=list)

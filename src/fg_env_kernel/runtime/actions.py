@@ -217,6 +217,17 @@ def _resolve_and_apply(engine, entity_id: str, action_instance: ActionInstance):
         )
         return
 
+    # Simultaneous/parallel decisions are collected before resolution. A guard
+    # deferred while listing actions must be checked now with the submitted
+    # parameters, and actor-only guards may have changed since collection.
+    if (not engine.state._check_actor_preconditions(entity, action_def)
+            or not engine._check_target_preconditions(entity, target, action_def, action_instance.parameters)):
+        engine._emit_event('action_failed', actor_id=entity_id,
+            target_id=action_instance.target_id, action_name=action_name,
+            data={'reason': 'preconditions_not_met'},
+            narrative=f'{entity.name} cannot perform {action_name}: preconditions not met.')
+        return
+
     # Some domain modules (e.g. Wordle / Hangman / Sudoku Duel) are
     # sealed-tick deduction races and must suppress public chat /
     # speech / action parameters between competitors. We check that

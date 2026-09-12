@@ -201,6 +201,23 @@ class TriggerDefinition(BaseModel):
         return value
 
 
+class PropertyTransferSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source: str = Field(default="actor", min_length=1, description="actor, target, entity ID, or an expression resolving to one entity")
+    target: str = Field(default="target", min_length=1)
+    field: str = Field(min_length=1, description="Declared numeric property on both entities, e.g. cash or stock")
+    amount: Any = Field(description="Nonnegative amount; literal or effect expression, evaluated once before transfers")
+
+    @field_validator("amount")
+    @classmethod
+    def valid_amount(cls, value):
+        from ..effect_values import expression_source, number, validate_operand
+        validate_operand(value, numeric=True)
+        if expression_source(value) is None and number(value) < 0:
+            raise ValueError("Transfer amount must be nonnegative")
+        return value
+
+
 class ActionSpec(BaseModel):
     model_config = ConfigDict(extra="allow")
     name: str
@@ -213,6 +230,8 @@ class ActionSpec(BaseModel):
     effects_on_success: List[EffectSpec] = Field(default_factory=list)
     effects_on_failure: List[EffectSpec] = Field(default_factory=list)
     effects_on_partial: List[EffectSpec] = Field(default_factory=list)
+    transfers: List[PropertyTransferSpec] = Field(default_factory=list, max_length=100,
+        description="Atomic conserved transfers on full success, before success effects. Resolve all amounts from pre-transfer state; reject ALL if any final balance violates bounds (default floor 0). No clamping, debit/credit effects, or partial-success transfers.")
     parameters: List[Dict[str, Any]] = Field(default_factory=list)
     requires_action: Optional[str] = None
     requires_action_success: bool = True
@@ -704,6 +723,7 @@ def _apply_actions(
             effects_on_success=_parse_effects(ad.get("effects_on_success", []), registry=registry),
             effects_on_failure=_parse_effects(ad.get("effects_on_failure", []), registry=registry),
             effects_on_partial=_parse_effects(ad.get("effects_on_partial", []), registry=registry),
+            transfers=[PropertyTransferSpec.model_validate(t).model_dump() for t in ad.get("transfers", [])],
             requires_action=ad.get("requires_action"),
             requires_action_success=ad.get("requires_action_success", True),
             cooldown_rounds=ad.get("cooldown_rounds", 0),

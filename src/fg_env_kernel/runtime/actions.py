@@ -303,8 +303,8 @@ def _resolve_and_apply(engine, entity_id: str, action_instance: ActionInstance):
     )
 
     # Apply effects
-    effects = action_def.effects_on_success if result.success else action_def.effects_on_failure
-    state_changes = engine._apply_effects(effects, entity, target, action_instance.parameters, result)
+    from ..transfers import apply_action_effects
+    state_changes = apply_action_effects(engine, action_def, entity, target, action_instance.parameters, result)
 
     # Notify domain modules
     if engine.state.domain_modules:

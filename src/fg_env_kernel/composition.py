@@ -17,6 +17,7 @@ All three handlers are auto-registered on import via @effect.
 """
 from __future__ import annotations
 
+import copy
 import logging
 from typing import Any, Dict, List
 
@@ -89,18 +90,26 @@ def _invoke_action(ctx: EffectContext, spec: Dict[str, Any]) -> Any:
 
     # Dispatch the invoked action's effects via the engine's _apply_effects
     # (lazy import to avoid circular)
-    from .runtime.effect_dispatch import apply_effects
-    sub_changes = apply_effects(
+    from .resolution import ResolutionResult
+    from .transfers import apply_action_effects
+    sub_result = copy.copy(ctx.result) if ctx.result is not None else ResolutionResult(success=True)
+    sub_result.success = True
+    sub_changes = apply_action_effects(
         # We need an engine reference but EffectContext stores state, not engine.
         # Reach for the engine via state.controller if available; else build a
         # shim with the minimum interface apply_effects uses.
         _shim_engine_for_ctx(ctx),
-        action_def.effects_on_success,
+        action_def,
         actor,
         target,
         merged_params,
-        ctx.result,
+        sub_result,
     )
+    if not sub_result.success and ctx.emit:
+        ctx.emit("action_failed", actor_id=actor.id if actor else None,
+                 action_name=action_name, data={**sub_result.details,
+                    "visible_to": [actor.id] if actor else []},
+                 narrative=sub_result.narrative)
     return sub_changes if isinstance(sub_changes, list) else None
 
 

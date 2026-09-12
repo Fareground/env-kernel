@@ -1,32 +1,20 @@
 {
   "live_capabilities": {
     "domain_modules": [
-      "backgammon",
-      "battleship",
       "board",
-      "chess",
       "deck",
-      "dispute_trial",
-      "dominoes",
       "ecological",
       "economic",
       "hand",
       "health",
       "hidden_state",
-      "judged_contest",
-      "mafia",
-      "monopoly",
-      "parliament",
-      "poker",
       "political",
       "prediction_market",
       "securities_trading",
       "slots",
       "state_machine",
-      "tic_tac_toe",
       "trade",
-      "turn_manager",
-      "united_nations"
+      "turn_manager"
     ],
     "effect_operations": [
       "add",
@@ -105,11 +93,16 @@
       "compound_and",
       "compound_or",
       "count_property",
+      "entity_count",
+      "entity_property_count",
       "event_triggered",
       "expr",
       "faction_win",
       "first_to_score",
       "last_one_standing",
+      "max_rounds",
+      "max_rounds_reached",
+      "property_stable",
       "property_threshold",
       "resource_exhausted",
       "round_limit",
@@ -121,7 +114,7 @@
   "notes": [
     "PREFER `expr` strings ('$actor.gold >= 100 && $actor.alive') for any guard (precondition, effect.condition, termination). Single grammar, fewer pitfalls.",
     "Built-in effect operations and EVERY registered custom op live in `live_capabilities.effect_operations` \u2014 there is no hidden vocabulary.",
-    "Always include at least one entity_type with role='agent' and at least one action whose actor_type matches it \u2014 otherwise nobody can act.",
+    "Use role='agent' only for decision-making participants, with matching actions. Autonomous systems use role='object' and executable derived rules, triggers, physics or domain modules; they do not need dummy decision agents.",
     "termination_conditions are optional but recommended; without one the game only stops at engine.max_rounds.",
     "Domain modules (chess, monopoly, prediction_market, \u2026) are referenced by name \u2014 DO NOT emit Python. Pick from `live_capabilities.domain_modules`.",
     "Visualization is the ONLY thing an env-builder agent generates as code \u2014 and even that is sandboxed Konva. Game logic is always declarative JSON."
@@ -135,6 +128,11 @@
             "default": "",
             "title": "Actor Type",
             "type": "string"
+          },
+          "broadcast": {
+            "default": true,
+            "title": "Broadcast",
+            "type": "boolean"
           },
           "cooldown_rounds": {
             "default": 0,
@@ -172,6 +170,13 @@
             "title": "Interruptible",
             "type": "boolean"
           },
+          "locks_actions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Locks Actions",
+            "type": "array"
+          },
           "message_action": {
             "default": false,
             "title": "Message Action",
@@ -195,6 +200,18 @@
             },
             "title": "Preconditions",
             "type": "array"
+          },
+          "range": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Range"
           },
           "requires_action": {
             "anyOf": [
@@ -239,12 +256,90 @@
             ],
             "default": null,
             "title": "Target Type"
+          },
+          "transfers": {
+            "description": "Atomic conserved transfers on full success, before success effects. Resolve all amounts from pre-transfer state; reject ALL if any final balance violates bounds (default floor 0). No clamping, debit/credit effects, or partial-success transfers.",
+            "items": {
+              "$ref": "#/$defs/PropertyTransferSpec"
+            },
+            "maxItems": 100,
+            "title": "Transfers",
+            "type": "array"
+          },
+          "unlocks_actions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unlocks Actions",
+            "type": "array"
           }
         },
         "required": [
           "name"
         ],
         "title": "ActionSpec",
+        "type": "object"
+      },
+      "DerivedRuleSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "as": {
+            "default": "it",
+            "description": "Iteration entity is available as $params.<as>; use it as the effect target.",
+            "title": "As",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "for_each": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Expression returning entities, e.g. $entities_of(Shop). Omit for a global rule.",
+            "title": "For Each"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "once_global": {
+            "default": false,
+            "title": "Once Global",
+            "type": "boolean"
+          },
+          "once_per_entity": {
+            "default": false,
+            "title": "Once Per Entity",
+            "type": "boolean"
+          },
+          "then": {
+            "items": {
+              "$ref": "#/$defs/EffectSpec"
+            },
+            "minItems": 1,
+            "title": "Then",
+            "type": "array"
+          },
+          "when": {
+            "default": null,
+            "description": "Predicate expression; evaluated per entity after agent turns each round.",
+            "title": "When"
+          }
+        },
+        "required": [
+          "then"
+        ],
+        "title": "DerivedRuleSpec",
         "type": "object"
       },
       "DomainModuleSpec": {
@@ -471,6 +566,76 @@
         "title": "EntityTypeSpec",
         "type": "object"
       },
+      "Phase": {
+        "description": "A named phase within a round.",
+        "properties": {
+          "active_roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Active Roles",
+            "type": "array"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "handler": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Handler"
+          },
+          "handler_params": {
+            "additionalProperties": true,
+            "title": "Handler Params",
+            "type": "object"
+          },
+          "initiative_descending": {
+            "default": true,
+            "title": "Initiative Descending",
+            "type": "boolean"
+          },
+          "initiative_property": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Initiative Property"
+          },
+          "initiative_type": {
+            "default": "fixed",
+            "title": "Initiative Type",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "resolution_mode": {
+            "default": "sequential",
+            "title": "Resolution Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "Phase",
+        "type": "object"
+      },
       "PreconditionSpec": {
         "additionalProperties": true,
         "description": "Either an expression string (``expr``) OR legacy structured form.",
@@ -614,6 +779,40 @@
         "title": "PropertySpec",
         "type": "object"
       },
+      "PropertyTransferSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "description": "Nonnegative amount; literal or effect expression, evaluated once before transfers",
+            "title": "Amount"
+          },
+          "field": {
+            "description": "Declared numeric property on both entities, e.g. cash or stock",
+            "minLength": 1,
+            "title": "Field",
+            "type": "string"
+          },
+          "source": {
+            "default": "actor",
+            "description": "actor, target, entity ID, or an expression resolving to one entity",
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          },
+          "target": {
+            "default": "target",
+            "minLength": 1,
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "amount"
+        ],
+        "title": "PropertyTransferSpec",
+        "type": "object"
+      },
       "ResourceTypeSpec": {
         "additionalProperties": true,
         "properties": {
@@ -665,6 +864,67 @@
         "title": "ResourceTypeSpec",
         "type": "object"
       },
+      "TemporalSpec": {
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "default": "discrete",
+            "enum": [
+              "discrete",
+              "continuous"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "phases": {
+            "description": "Each eligible agent acts once per phase per round. active_roles names entity types.",
+            "items": {
+              "$ref": "#/$defs/Phase"
+            },
+            "title": "Phases",
+            "type": "array"
+          },
+          "round_duration_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Real-world time represented by one simulation round.",
+            "title": "Round Duration Seconds"
+          },
+          "sim_start_iso": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Sim Start Iso"
+          },
+          "time_unit_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Time Unit Label"
+          }
+        },
+        "title": "TemporalSpec",
+        "type": "object"
+      },
       "TerminationSpec": {
         "additionalProperties": true,
         "properties": {
@@ -699,6 +959,73 @@
           "name"
         ],
         "title": "TerminationSpec",
+        "type": "object"
+      },
+      "TriggerDefinition": {
+        "additionalProperties": false,
+        "description": "Event subscription, not a predicate rule. Exported to authoring tools.\n\nPredicate-based ``when`` / ``then`` belongs in derived_rules. Previously\narbitrary dictionaries here could compile and silently do nothing.\nKeep the historically supported ``effects`` alias, normalized to effect.",
+        "properties": {
+          "cooldown_rounds": {
+            "default": 0,
+            "minimum": 0,
+            "title": "Cooldown Rounds",
+            "type": "integer"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "effect": {
+            "items": {
+              "$ref": "#/$defs/EffectSpec"
+            },
+            "minItems": 1,
+            "title": "Effect",
+            "type": "array"
+          },
+          "filter": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Filter"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Name"
+          },
+          "once": {
+            "default": false,
+            "title": "Once",
+            "type": "boolean"
+          },
+          "when": {
+            "description": "Exact emitted event type, e.g. round_end; not an expression or condition object.",
+            "minLength": 1,
+            "title": "When",
+            "type": "string"
+          }
+        },
+        "required": [
+          "when",
+          "effect"
+        ],
+        "title": "TriggerDefinition",
         "type": "object"
       }
     },
@@ -745,10 +1072,8 @@
       },
       "derived_rules": {
         "items": {
-          "additionalProperties": true,
-          "type": "object"
+          "$ref": "#/$defs/DerivedRuleSpec"
         },
-        "title": "Derived Rules",
         "type": "array"
       },
       "description": {
@@ -866,13 +1191,26 @@
         "title": "Resource Unallocated",
         "type": "array"
       },
+      "rules": {
+        "default": "",
+        "title": "Rules",
+        "type": "string"
+      },
       "runtime_parameters": {
-        "items": {
-          "additionalProperties": true,
-          "type": "object"
-        },
-        "title": "Runtime Parameters",
-        "type": "array"
+        "anyOf": [
+          {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        ],
+        "title": "Runtime Parameters"
       },
       "skill_definitions": {
         "items": {
@@ -898,9 +1236,7 @@
         "type": "object"
       },
       "temporal": {
-        "additionalProperties": true,
-        "title": "Temporal",
-        "type": "object"
+        "$ref": "#/$defs/TemporalSpec"
       },
       "termination_conditions": {
         "items": {
@@ -911,8 +1247,7 @@
       },
       "triggers": {
         "items": {
-          "additionalProperties": true,
-          "type": "object"
+          "$ref": "#/$defs/TriggerDefinition"
         },
         "title": "Triggers",
         "type": "array"

@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- `$entity(id).property` now resolves in action guards and termination predicates
+  through the existing typed effect-value resolver. Missing entities/properties,
+  invalid arguments and private attribute paths still fail closed under negation.
+
 ## [0.2.0] — 2026-08-10
 
 ### Changed

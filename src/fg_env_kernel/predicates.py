@@ -597,12 +597,25 @@ def _looks_like_expression(src: str) -> bool:
 
 
 def _resolve_dollar(src: str, ctx: _Ctx) -> Any:
-    val = resolve_expression(
-        src,
-        actor=ctx.actor, target=ctx.target, params=ctx.params,
-        state=ctx.state, last_event=ctx.last_event, result=ctx.result,
-        rng=ctx.rng,
-    )
+    if src.startswith("$entity("):
+        # Entity lookup plus a property path is already supported by effects.
+        # The legacy resolver only recognizes calls ending in ')', so routing
+        # '$entity(id).field' through it made documented action guards inert.
+        from .effect_values import EffectValueError, resolve_value
+
+        try:
+            val = resolve_value(src, actor=ctx.actor, target=ctx.target, params=ctx.params,
+                                state=ctx.state, last_event=ctx.last_event,
+                                result=ctx.result, rng=ctx.rng)
+        except EffectValueError:
+            val = None
+    else:
+        val = resolve_expression(
+            src,
+            actor=ctx.actor, target=ctx.target, params=ctx.params,
+            state=ctx.state, last_event=ctx.last_event, result=ctx.result,
+            rng=ctx.rng,
+        )
     # resolve_expression returns the original string when unresolvable —
     # for predicate purposes that's a missing value, not the literal
     # string. Map it back to None so comparisons fail closed.

@@ -223,7 +223,7 @@ def run_agent_turn(engine, entity_id: str):
         engine.state.plans.validate_plan(entity_id, valid_actions, round_num)
 
     # 2. Get valid actions
-    if not valid_actions:
+    if not valid_actions and not active_seq:
         return
 
     # 2b. Apply bounded rationality to filter perception
@@ -231,12 +231,13 @@ def run_agent_turn(engine, entity_id: str):
         perception = engine.state.cognition.process_perception_for(entity_id, perception)
 
     # 3. Get decision from callback (or crowd behavior or human takeover)
-    if engine.decision_fn is None:
+    if engine.decision_fn is None and not active_seq:
         return
 
     # 3a. Check if this is a crowd agent (skip LLM entirely)
-    action_instance = None
-    if engine.state.crowd_agents and engine.state.crowd_agents.is_crowd(entity_id):
+    from .sequence import committed_action
+    action_instance = committed_action(engine, entity_id)
+    if action_instance is None and engine.state.crowd_agents and engine.state.crowd_agents.is_crowd(entity_id):
         behavior = engine.state.crowd_agents.get_behavior(entity_id)
         if behavior:
             # Crowd behaviors mutate state (buy/sell); pin their RNG to the
@@ -272,7 +273,7 @@ def run_agent_turn(engine, entity_id: str):
             action_instance = takeover._human_decision_fn(entity_id, perception, valid_actions)
 
     # 3c. Fall back to LLM decision_fn
-    if action_instance is None:
+    if action_instance is None and valid_actions and engine.decision_fn is not None:
         try:
             action_instance = engine.decision_fn(entity_id, perception, valid_actions)
         except Exception as e:
@@ -285,131 +286,11 @@ def run_agent_turn(engine, entity_id: str):
                 narrative=f"Decision error for {entity_id}: {e}",
             )
             raise
-    if action_instance is None:
-        # If in a non-interruptible sequence, force continuation
-        if active_seq:
-            seq_def = engine.state.action_definitions.get(active_seq.action_name)
-            if seq_def and not seq_def.interruptible:
-                action_instance = ActionInstance(
-                    action_name=active_seq.action_name,
-                    actor_id=entity_id,
-                    target_id=active_seq.target_id,
-                    parameters=active_seq.parameters,
-                )
-            else:
-                # Interruptible sequence cancelled by passing
-                engine.state.sequences.cancel(entity_id)
-                engine._emit_event(
-                    "sequence_cancelled",
-                    actor_id=entity_id,
-                    action_name=active_seq.action_name,
-                    narrative=f"{entity.name} abandons {active_seq.action_name}.",
-                )
-
-        if action_instance is None:
-            engine._emit_event(
-                "action_skipped",
-                actor_id=entity_id,
-                narrative=f"{entity.name} passes.",
-            )
-            return
-
-    # 3b. Handle sequence continuation or interruption
-    if active_seq:
-        if action_instance.action_name == active_seq.action_name:
-            # Continue the sequence
-            completed = engine.state.sequences.advance(entity_id)
-            if not completed:
-                # Still in progress — emit progress event, skip resolution
-                seq = engine.state.sequences.get_active(entity_id)
-                engine._emit_event(
-                    "sequence_progress",
-                    actor_id=entity_id,
-                    action_name=active_seq.action_name,
-                    data={
-                        "rounds_completed": seq.rounds_completed if seq else active_seq.rounds_completed + 1,
-                        "total_rounds": active_seq.total_rounds,
-                    },
-                    narrative=f"{entity.name} continues {active_seq.action_name} ({active_seq.rounds_completed + 1}/{active_seq.total_rounds}).",
-                )
-                return
-            else:
-                # Sequence complete — emit completion event and proceed to normal resolution
-                engine._emit_event(
-                    "sequence_completed",
-                    actor_id=entity_id,
-                    action_name=active_seq.action_name,
-                    narrative=f"{entity.name} completes {active_seq.action_name}!",
-                )
-                # Fall through to normal resolution below
-        else:
-            # Chose a different action
-            seq_def = engine.state.action_definitions.get(active_seq.action_name)
-            if seq_def and not seq_def.interruptible:
-                # Force continuation — override the agent's choice
-                action_instance = ActionInstance(
-                    action_name=active_seq.action_name,
-                    actor_id=entity_id,
-                    target_id=active_seq.target_id,
-                    parameters=active_seq.parameters,
-                )
-                completed = engine.state.sequences.advance(entity_id)
-                if not completed:
-                    seq = engine.state.sequences.get_active(entity_id)
-                    engine._emit_event(
-                        "sequence_progress",
-                        actor_id=entity_id,
-                        action_name=active_seq.action_name,
-                        data={
-                            "rounds_completed": seq.rounds_completed if seq else active_seq.rounds_completed + 1,
-                            "total_rounds": active_seq.total_rounds,
-                        },
-                        narrative=f"{entity.name} must continue {active_seq.action_name} ({active_seq.rounds_completed + 1}/{active_seq.total_rounds}).",
-                    )
-                    return
-                else:
-                    engine._emit_event(
-                        "sequence_completed",
-                        actor_id=entity_id,
-                        action_name=active_seq.action_name,
-                        narrative=f"{entity.name} completes {active_seq.action_name}!",
-                    )
-            else:
-                # Interruptible — cancel and proceed with new action
-                engine.state.sequences.cancel(entity_id)
-                engine._emit_event(
-                    "sequence_cancelled",
-                    actor_id=entity_id,
-                    action_name=active_seq.action_name,
-                    narrative=f"{entity.name} interrupts {active_seq.action_name}.",
-                )
-
-    # 4. Validate the chosen action (normalizes case/typo in place and
-    # emits action_corrected / action_failed — same logic as the
-    # parallel resolve path).
-    action_def = engine._resolve_action_def(entity, action_instance)
-    if action_def is None:
+    from .sequence import prepare_action
+    prepared = prepare_action(engine, entity, action_instance)
+    if prepared is None:
         return
-
-    # 4b. Check if this is a new multi-round sequence start
-    if action_def.sequence_rounds > 0 and not active_seq:
-        # Start a new sequence — don't resolve yet
-        engine.state.sequences.start(
-            entity_id=entity_id,
-            action_name=action_instance.action_name,
-            target_id=action_instance.target_id,
-            parameters=action_instance.parameters,
-            total_rounds=action_def.sequence_rounds,
-            round_num=round_num,
-        )
-        engine._emit_event(
-            "sequence_started",
-            actor_id=entity_id,
-            action_name=action_instance.action_name,
-            data={"total_rounds": action_def.sequence_rounds},
-            narrative=f"{entity.name} begins {action_instance.action_name} (1/{action_def.sequence_rounds} rounds).",
-        )
-        return
+    action_instance, action_def = prepared
 
     # See the docstring in the parallel resolve path: chat-suppressed
     # modules (Wordle Duel) wipe speech/reasoning from every event

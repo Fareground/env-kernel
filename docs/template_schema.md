@@ -85,6 +85,16 @@ Field notes:
 - `resolution_archetype` — how success is decided. `deterministic` (default, always succeeds) or any registered archetype: `skill_check`, `contest`, `voting`, `order_book`, `cpmm`, the auction family, etc. — live list in `kernel_contract.json`. `resolution_params` configures it.
 - `effects_on_success` / `effects_on_failure` / `effects_on_partial` — effect lists (below).
 - Sequencing: `requires_action` (+ `requires_action_success`), `cooldown_rounds`, `sequence_rounds` (multi-round actions), `interruptible`, `unlocks_actions`, `locks_actions`.
+
+  In discrete simulations, `sequence_rounds: N` counts the starting round: effects
+  resolve on the Nth round, at most one progress tick per world round even with
+  multiple phases. Sequential, simultaneous and parallel execution use the same
+  lifecycle. Continuing an action preserves its original target and parameters;
+  changing them requires cancelling and starting new work. Passing or choosing a
+  different action cancels interruptible work. Non-interruptible work continues
+  without another model decision. Runtime restrictions are rechecked before
+  progress; invalidated work is cancelled without applying completion effects.
+  Checkpoints persist the committed inputs, progress and last advancement round.
 - `message_action: true` — the action carries a message payload.
 - `broadcast: false` — the resolved action is not announced to every agent (night kills, secret votes).
 - `range` — max spatial distance to the target.

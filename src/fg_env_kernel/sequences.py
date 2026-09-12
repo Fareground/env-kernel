@@ -18,6 +18,7 @@ class ActiveSequence:
     total_rounds: int = 1
     rounds_completed: int = 0
     started_round: int = 0
+    last_advanced_round: Optional[int] = None
 
 
 class SequenceTracker:
@@ -40,7 +41,7 @@ class SequenceTracker:
             entity_id=entity_id,
             action_name=action_name,
             target_id=target_id,
-            parameters=dict(parameters),
+            parameters=copy.deepcopy(parameters),
             total_rounds=total_rounds,
             rounds_completed=0,
             started_round=round_num,
@@ -79,6 +80,7 @@ class SequenceTracker:
                 "total_rounds": seq.total_rounds,
                 "rounds_completed": seq.rounds_completed,
                 "started_round": seq.started_round,
+                "last_advanced_round": seq.last_advanced_round,
             }
             for entity_id, seq in self._active.items()
         }
@@ -96,5 +98,9 @@ class SequenceTracker:
                 raise ValueError("invalid active sequence progress")
             if type(seq.started_round) is not int or seq.started_round < 0 or not isinstance(seq.parameters, dict):
                 raise ValueError("invalid sequence start round or parameters")
+            if seq.last_advanced_round is not None and (
+                type(seq.last_advanced_round) is not int or seq.last_advanced_round < seq.started_round
+            ):
+                raise ValueError("invalid sequence advancement round")
             tracker._active[entity_id] = seq
         return tracker

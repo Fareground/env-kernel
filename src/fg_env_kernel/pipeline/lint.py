@@ -50,6 +50,7 @@ def lint_template(template: Any, *, registry: Any = None) -> List[CompileIssue]:
     _check_entity_types_have_agent(ctx, issues)
     _check_terminations_exist(ctx, issues)
     _check_action_actor_target_types(ctx, issues)
+    _check_property_transfers(ctx, issues)
     _check_action_effects_reference_known_fields(ctx, issues)
     _check_action_effects_reference_known_resources(ctx, issues)
     _check_action_resolution_archetype_registered(ctx, issues)
@@ -244,6 +245,35 @@ def _check_action_actor_target_types(ctx: _LintCtx, issues: List[CompileIssue]) 
                 message=f"target_type '{target_type}' is not a declared entity_type",
                 hint=f"Pick one of: {sorted(known) or '<none>'}.",
             ))
+
+
+def _check_property_transfers(ctx, issues):
+    from .loader import PropertyTransferSpec
+    types = {t["name"]: {p["name"]: p for p in t.get("properties", [])}
+             for t in ctx.data.get("entity_types", [])}
+    entities = {e["id"]: e["entity_type"] for e in ctx.data.get("entities", [])}
+    for i, action in enumerate(ctx.data.get("actions", [])):
+        for j, raw in enumerate(action.get("transfers", [])):
+            path = f"actions[{i}].transfers[{j}]"
+            try:
+                transfer = PropertyTransferSpec.model_validate(raw)
+            except ValueError as exc:
+                issues.append(CompileIssue(severity="error", path=path, message=str(exc),
+                    hint="Use source, target, field and a finite nonnegative amount/expression."))
+                continue
+            for name in ("source", "target"):
+                ref = getattr(transfer, name)
+                if ref.startswith("$"):
+                    continue  # Dynamic selectors are validated against actual state.
+                kind = action.get("actor_type") if ref == "actor" else (
+                    action.get("target_type") if ref == "target" else entities.get(ref))
+                if ref in ("actor", "target") and not kind:
+                    continue
+                prop = types.get(kind, {}).get(transfer.field)
+                if prop is None or prop.get("type", "float") not in ("float", "number", "int", "integer"):
+                    issues.append(CompileIssue(severity="error", path=f"{path}.{name}",
+                        message=f"Transfer {name} must resolve to a declared numeric property {transfer.field!r}",
+                        hint="Declare both account properties and valid actor/target types or entity IDs."))
 
 
 def _check_action_effects_reference_known_fields(

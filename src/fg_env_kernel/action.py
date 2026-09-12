@@ -230,6 +230,9 @@ class ActionDefinition:
 
     # Continuous-time duration (only used in CONTINUOUS temporal mode)
     duration: float = 0.0                        # How long this action takes in continuous time
+    # Atomic, conserved numeric-property transfers on full success. Amounts
+    # resolve once against pre-transfer state; bounds reject rather than clamp.
+    transfers: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass

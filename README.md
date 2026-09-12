@@ -124,6 +124,8 @@ The facade is a thin wrapper over `load_world(template, *, seed=0, decision_fn=N
 
 The full template shape is documented in [`docs/template_schema.md`](docs/template_schema.md); the machine-readable contract (including the live list of every registered effect operation, resolution archetype, termination check, and domain module) is [`docs/kernel_contract.json`](docs/kernel_contract.json).
 
+For cash or other conserved numeric properties, use [atomic property transfers](docs/property-transfers.md) instead of independent clamped debit and credit effects.
+
 ### Continuous time and physics
 
 A `physics` block on the world definition declares numeric variables and their rates of change. A dt-aware 4th-order Runge–Kutta integrator evolves them between turns — predator/prey, epidemics (SIR), price discovery. Variables can read entity aggregates and write values back onto the world. The result is deterministic and serializable.

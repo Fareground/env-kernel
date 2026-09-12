@@ -506,13 +506,8 @@ def run_agent_turn(engine, entity_id: str):
     )
 
     # 6. Apply effects (with partial success support)
-    if result.success:
-        effects = action_def.effects_on_success
-    elif result.partial and action_def.effects_on_partial:
-        effects = action_def.effects_on_partial
-    else:
-        effects = action_def.effects_on_failure
-    state_changes = engine._apply_effects(effects, entity, target, action_instance.parameters, result)
+    from ..transfers import apply_action_effects
+    state_changes = apply_action_effects(engine, action_def, entity, target, action_instance.parameters, result)
 
     # 7. Generate narrative (rich if narrative_fn provided, else mechanical fallback)
     if engine.narrative_fn:

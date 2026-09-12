@@ -9,7 +9,11 @@ agent (LLM or otherwise) can read it without any kernel imports.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, List, Tuple
+import copy
+from collections import deque
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
+
+from ..event import EventLog
 
 if TYPE_CHECKING:
     from .engine import SimulationEngine
@@ -168,38 +172,72 @@ def _apply_cognition(
     return state.cognition.process_perception_for(entity_id, perception)
 
 
+class _TradeHistoryProjection:
+    """Derived, bounded per-actor view; the full transcript remains authoritative.
+
+    Never serialized into checkpoints: a restored/replaced log resets the
+    opaque cursor and reconstructs totals once from its exact retained prefix.
+    """
+    def __init__(self) -> None:
+        self.cursor: Optional[Tuple[object, int]] = None
+        self.actors: Dict[Optional[str], Any] = {}
+        self.invalid: Set[Optional[str]] = set()
+
+    def update(self, log: EventLog) -> None:
+        cursor, events, reset = log.read_after(self.cursor)
+        if reset:
+            self.actors.clear()
+            self.invalid.clear()
+        for ev in events:
+            if ev.actor_id in self.invalid:
+                continue
+            try:
+                if ev.event_type != 'action_resolved' or ev.action_name not in _TRADE_ACTIONS:
+                    continue
+                details = ev.data.get('details', {}) if isinstance(ev.data, dict) else {}
+                if not details.get('shares') and not details.get('amount'):
+                    continue
+                row = {
+                    "round": ev.round_number,
+                    "action": ev.action_name,
+                    "amount": details.get("amount", 0),
+                    "shares": details.get("shares", 0),
+                    "price_at_trade": (
+                        details.get("price_after")
+                        or details.get("execution_price")
+                        or details.get("new_price", 0)
+                    ),
+                }
+                actor = self.actors.setdefault(ev.actor_id, {
+                    'count': 0, 'spent': 0, 'received': 0,
+                    'recent': deque(maxlen=_RECENT_TRADE_LIMIT),
+                })
+                actor['count'] += 1
+                key = 'spent' if ev.action_name.startswith('buy') else 'received'
+                actor[key] += row['amount']
+                actor['recent'].append(copy.deepcopy(row))
+            except (TypeError, ValueError, AttributeError):
+                # Preserve the prior fail-closed behavior for this actor's
+                # malformed blotter, without hiding another actor's valid data.
+                self.invalid.add(ev.actor_id)
+        self.cursor = cursor
+
+
 def _add_trade_history(state: Any, entity_id: str, perception: Dict[str, Any]) -> None:
-    """Structured blotter from this agent's past trades."""
+    """Exact totals and recent trades, updated once per newly appended event."""
     try:
-        agent_events = state.event_log.get_by_actor(entity_id)
-        trades = []
-        for ev in agent_events:
-            if ev.event_type != "action_resolved" or ev.action_name not in _TRADE_ACTIONS:
-                continue
-            details = ev.data.get("details", {}) if isinstance(ev.data, dict) else {}
-            if not details.get("shares") and not details.get("amount"):
-                continue
-            trades.append({
-                "round": ev.round_number,
-                "action": ev.action_name,
-                "amount": details.get("amount", 0),
-                "shares": details.get("shares", 0),
-                "price_at_trade": (
-                    details.get("price_after")
-                    or details.get("execution_price")
-                    or details.get("new_price", 0)
-                ),
-            })
-        if trades:
-            # Summarize: last N trades + running P&L
-            total_spent = sum(t["amount"] for t in trades if t["action"].startswith("buy"))
-            total_received = sum(t["amount"] for t in trades if t["action"].startswith("sell"))
+        projection = getattr(state, '_trade_history_projection', None)
+        if projection is None:
+            projection = state._trade_history_projection = _TradeHistoryProjection()
+        projection.update(state.event_log)
+        actor = projection.actors.get(entity_id)
+        if actor and entity_id not in projection.invalid:
             perception["trade_history"] = {
-                "total_trades": len(trades),
-                "total_spent": round(total_spent, 2),
-                "total_received": round(total_received, 2),
-                "realized_pnl": round(total_received - total_spent, 2),
-                "recent_trades": trades[-_RECENT_TRADE_LIMIT:],
+                'total_trades': actor['count'],
+                'total_spent': round(actor['spent'], 2),
+                'total_received': round(actor['received'], 2),
+                'realized_pnl': round(actor['received'] - actor['spent'], 2),
+                'recent_trades': copy.deepcopy(list(actor['recent'])),
             }
     except Exception:
         pass

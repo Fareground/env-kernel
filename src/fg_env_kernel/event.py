@@ -2,7 +2,7 @@
 from collections import Counter, deque
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Deque, Dict, List, Optional
+from typing import Any, Deque, Dict, List, Optional, Tuple
 
 
 @dataclass
@@ -58,6 +58,7 @@ class EventLog:
 
     def _rebuild_index(self) -> None:
         """Recompute every index from ``_events``."""
+        self._read_epoch = object()
         self._by_round: Dict[Any, Deque[SimEvent]] = {}
         self._type_rounds: Dict[str, Counter] = {}
         self._type_counted: Dict[str, int] = {}
@@ -106,8 +107,26 @@ class EventLog:
             for dropped in self._events[:overflow]:
                 self._unindex_oldest(dropped)
             del self._events[:overflow]
+            # Incremental readers must rebuild projections of retained history
+            # when the prefix disappears. Emitted events are append-only; code
+            # replacing/editing existing rows must call _rebuild_index too.
+            self._read_epoch = object()
 
     # -- reads -------------------------------------------------------------
+
+    def read_after(self, cursor: Optional[Tuple[object, int]] = None) -> Tuple[Tuple[object, int], List[SimEvent], bool]:
+        """Read only newly appended events, or reset after trim/rebuild.
+
+        The opaque in-process cursor is tied to this exact retained log, not a
+        round number (continuous events may share rounds). It is not a durable
+        export cursor. Callers must reset their derived values when reset=True.
+        Returned event references have the same append-only contract as get_all.
+        """
+        reset = cursor is None or cursor[0] is not self._read_epoch
+        start = 0 if reset else cursor[1]
+        if type(start) is not int or not 0 <= start <= len(self._events):
+            raise ValueError('Invalid event cursor offset')
+        return (self._read_epoch, len(self._events)), self._events[start:], reset
 
     def get_all(self) -> List[SimEvent]:
         """Get all events."""

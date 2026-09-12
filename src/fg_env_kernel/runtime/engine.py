@@ -212,6 +212,7 @@ class SimulationEngine:
         on_checkpoint: Optional[Callable] = None,
         execution_checkpoint: Optional[dict] = None,
         checkpoint_event_history: Optional[List[dict]] = None,
+        checkpoint_action_history: Optional[Dict[str, List[dict]]] = None,
     ):
         self.state = state
         # Primitive registry this engine resolves custom effect ops and
@@ -293,16 +294,18 @@ class SimulationEngine:
                     reseed(self._rng)
 
         if execution_checkpoint is not None:
-            self.restore_checkpoint(execution_checkpoint, event_history=checkpoint_event_history)
+            self.restore_checkpoint(execution_checkpoint, event_history=checkpoint_event_history,
+                                    action_history=checkpoint_action_history)
 
-    def checkpoint(self, *, external_state=None, include_events=True) -> dict:
+    def checkpoint(self, *, external_state=None, include_events=True, include_action_history=True) -> dict:
         """Capture execution state at a completed work-unit boundary."""
         from ..checkpoint import capture
-        return capture(self, external_state=external_state, include_events=include_events)
+        return capture(self, external_state=external_state, include_events=include_events,
+                       include_action_history=include_action_history)
 
-    def restore_checkpoint(self, checkpoint: dict, *, event_history=None) -> None:
+    def restore_checkpoint(self, checkpoint: dict, *, event_history=None, action_history=None) -> None:
         from ..checkpoint import restore
-        restore(self, checkpoint, event_history=event_history)
+        restore(self, checkpoint, event_history=event_history, action_history=action_history)
 
     def _notify_checkpoint(self):
         self._checkpoint_ready = True

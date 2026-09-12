@@ -17,6 +17,7 @@ from .world_events import ActiveEvent, DynamicsRule, WorldDynamicsEngine, WorldE
 
 
 FORMAT = "fg-execution-v1"
+REFERENCED_FORMAT = "fg-execution-v2"
 
 
 def _world_events_to_dict(manager):
@@ -64,7 +65,7 @@ def _world_events_from_dict(data, rng):
     return result
 
 
-def capture(engine: Any, *, external_state=None, include_events=True) -> dict:
+def capture(engine: Any, *, external_state=None, include_events=True, include_action_history=True) -> dict:
     if not engine._checkpoint_ready:
         raise ValueError('Execution checkpoints require a completed round or scheduled event')
     invariant = engine.invariant_checker
@@ -76,9 +77,9 @@ def capture(engine: Any, *, external_state=None, include_events=True) -> dict:
     # WorldState.to_dict already detaches every nested subsystem. Copy the
     # engine/external payload separately so growing world history is not walked
     # and allocated a second time at every checkpoint boundary.
-    world = engine.state.to_dict()
+    world = engine.state.to_dict() if include_action_history else engine.state.to_dict(include_action_history=False)
     checkpoint = copy.deepcopy({
-        'format': FORMAT,
+        'format': FORMAT if include_action_history else REFERENCED_FORMAT,
         'external_state': external_state,
         'execution': {
             'seed': engine.seed, 'rng_state': engine._rng.getstate(), 'max_rounds': engine.max_rounds,
@@ -103,10 +104,12 @@ def capture(engine: Any, *, external_state=None, include_events=True) -> dict:
                       'events': engine.state.event_log.to_transcript() if include_events else None},
     })
     checkpoint['world'] = world
+    if not include_action_history:
+        checkpoint['action_history'] = engine.state.action_history.reference()
     return checkpoint
 
 
-def restore(engine: Any, checkpoint: dict, *, event_history=None) -> None:
+def restore(engine: Any, checkpoint: dict, *, event_history=None, action_history=None) -> None:
     """Validate all components before replacing any live engine/world state.
 
     Callback implementations and any external clients remain the caller's
@@ -115,8 +118,21 @@ def restore(engine: Any, checkpoint: dict, *, event_history=None) -> None:
     from .runtime.engine import TerminationCondition
     data = copy.deepcopy(checkpoint)
     try:
-        if data['format'] != FORMAT:
+        if data['format'] not in (FORMAT, REFERENCED_FORMAT):
             raise ValueError('unsupported execution checkpoint format')
+        referenced = data['format'] == REFERENCED_FORMAT
+        world_data = data['world']
+        if referenced:
+            from .state import ActionHistory
+            if not isinstance(action_history, dict) or world_data['action_history']['history'] is not None:
+                raise ValueError('checkpoint action history is missing or not externally referenced')
+            # Materialize once on restore, never on every capture. Bind exact
+            # actors, counts and record contents before replacing live state.
+            world_data = copy.deepcopy(world_data)
+            world_data['action_history']['history'] = copy.deepcopy(action_history)
+            restored_history = ActionHistory.from_dict(world_data['action_history'])
+            if restored_history.reference() != data['action_history']:
+                raise ValueError('checkpoint action history does not match its prefix fingerprint')
         execution = data['execution']
         for key in ('seed', 'max_rounds', 'parallel_decisions'):
             if key == 'max_rounds' and execution[key] is None:
@@ -134,7 +150,7 @@ def restore(engine: Any, checkpoint: dict, *, event_history=None) -> None:
         rng.setstate(tuples(execution['rng_state']))
         state = copy.copy(engine.state)
         state.modules = dict(state.modules)
-        state.apply_snapshot(data['world'])
+        state.apply_snapshot(world_data)
         event_data = data['event_log']
         events = event_data['events'] if event_data['events'] is not None else copy.deepcopy(event_history)
         if events is None or len(events) != event_data['count']:
@@ -189,7 +205,8 @@ def restore(engine: Any, checkpoint: dict, *, event_history=None) -> None:
         candidate.state = state
         candidate.__dict__.update(fields)
         _preserved(data, capture(candidate, external_state=data.get('external_state'),
-                                 include_events=event_data['events'] is not None), 'checkpoint')
+                                 include_events=event_data['events'] is not None,
+                                 include_action_history=not referenced), 'checkpoint')
     except Exception as exc:
         raise SnapshotRestoreError(f'Cannot restore execution checkpoint: {exc}') from exc
     # Preserve the WorldState object's identity: platform callbacks close over it.

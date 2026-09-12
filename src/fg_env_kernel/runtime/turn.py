@@ -440,33 +440,8 @@ def run_agent_turn(engine, entity_id: str):
     # 5. Resolve (apply status effect modifiers to properties for resolution)
     target = engine.state.get_entity(action_instance.target_id) if action_instance.target_id else None
 
-    # 5a. Domain module validation (e.g. budget checks for prediction markets)
-    if engine.state.domain_modules:
-        validation_error = engine.state.domain_modules.validate_action(
-            action_instance.action_name, entity, target, engine.state,
-        )
-        if validation_error:
-            engine._emit_event(
-                "action_failed",
-                actor_id=entity_id,
-                target_id=action_instance.target_id,
-                action_name=action_instance.action_name,
-                data={"success": False, "details": {"reason": validation_error}},
-                narrative=f"{entity.name} cannot {action_instance.action_name}: {validation_error}",
-            )
-            return
-
-    # 5b. Check target-side preconditions (IS_ADJACENT, SAME_FACTION, etc.)
-    if not engine._check_target_preconditions(entity, target, action_def, action_instance.parameters):
-        engine._emit_event(
-            "action_failed",
-            actor_id=entity_id,
-            target_id=action_instance.target_id,
-            action_name=action_instance.action_name,
-            narrative=f"{entity.name} cannot perform {action_instance.action_name}: preconditions not met.",
-        )
-        return
-
+    # Actor, target, guards and domain constraints were validated by the
+    # shared resolver before sequence start or action_attempted emission.
     archetype = get_resolution(action_def.resolution_archetype)
 
     # Build modified properties with status effect bonuses/penalties

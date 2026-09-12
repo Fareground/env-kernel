@@ -24,6 +24,56 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _validate_selected_action(engine, entity, action_def, action_instance) -> bool:
+    """Enforce the selected choice against current state before any execution.
+
+    Menus are advisory: callbacks may ignore them and simultaneous decisions
+    may be stale. Check one definition, not every action in a growing world.
+    The same boundary protects sequential sequence starts and parallel effects.
+    """
+    state = engine.state
+    name = action_instance.action_name
+
+    def reject(reason, details=None):
+        engine._emit_event('action_failed', actor_id=entity.id, action_name=name,
+                          target_id=action_instance.target_id,
+                          data={'reason': reason, 'details': details or {}},
+                          narrative=f'{entity.name} cannot perform {name}: {reason.replace("_", " ")}.')
+        return False
+
+    if not entity.alive or action_def.actor_type != entity.entity_type:
+        return reject('unauthorized_actor')
+    if (name in state.status_effects.get_blocked_actions(entity.id)
+            or not state.action_history.is_available(entity.id, name, action_def,
+                                                     state.temporal.current_round)):
+        return reject('action_unavailable')
+    if not engine._coerce_action_params(entity, action_def, action_instance):
+        return False
+
+    target = state.get_entity(action_instance.target_id) if action_instance.target_id else None
+    if action_instance.target_id and target is None:
+        if action_def.target_type:
+            return reject('unknown_target')
+        # Preserve target-less actions' handling of an irrelevant, stray ID.
+        action_instance.target_id = None
+    if action_def.target_type:
+        if target is None:
+            return reject('missing_target')
+        if target.entity_type != action_def.target_type:
+            return reject('invalid_target_type')
+
+    if (not state._check_actor_preconditions(entity, action_def)
+            or not engine._check_target_preconditions(entity, target, action_def, action_instance.parameters)):
+        return reject('preconditions_not_met')
+    if state.domain_modules:
+        if name not in state.domain_modules.filter_valid_actions(entity.id, [name], state):
+            return reject('action_unavailable')
+        error = state.domain_modules.validate_action(name, entity, target, state)
+        if error:
+            return reject('domain_validation_failed', {'reason': error})
+    return True
+
+
 def _resolve_action_def(engine, entity, action_instance: "ActionInstance"):
     """Resolve an action name to its definition, normalizing it in place.
 
@@ -40,7 +90,7 @@ def _resolve_action_def(engine, entity, action_instance: "ActionInstance"):
     action_name = action_instance.action_name
     action_def = engine.state.action_definitions.get(action_name)
     if action_def is not None:
-        return action_def if engine._coerce_action_params(entity, action_def, action_instance) else None
+        return action_def if _validate_selected_action(engine, entity, action_def, action_instance) else None
 
     from difflib import get_close_matches
     valid = list(engine.state.action_definitions.keys())
@@ -68,7 +118,7 @@ def _resolve_action_def(engine, entity, action_instance: "ActionInstance"):
         )
         action_instance.action_name = fallback
         corrected = engine.state.action_definitions[fallback]
-        return corrected if engine._coerce_action_params(entity, corrected, action_instance) else None
+        return corrected if _validate_selected_action(engine, entity, corrected, action_instance) else None
 
     engine._emit_event(
         "action_failed",
@@ -185,48 +235,7 @@ def _resolve_and_apply(engine, entity_id: str, action_instance: ActionInstance):
         return
     action_name = action_instance.action_name
 
-    target = None
-    if action_instance.target_id:
-        target = engine.state.get_entity(action_instance.target_id)
-        if target is None:
-            # If the action doesn't declare a target_type, silently drop
-            # the stray target instead of failing the whole turn. LLMs
-            # sometimes hallucinate target_id for target-less actions
-            # (e.g. chess `make_move` with target_id='d7'). Treat that
-            # as harmless: clear the target and proceed.
-            if not action_def.target_type:
-                action_instance.target_id = None
-            else:
-                engine._emit_event(
-                    "action_failed",
-                    actor_id=entity_id,
-                    action_name=action_name,
-                    target_id=action_instance.target_id,
-                    data={"reason": "unknown_target", "details": {"target_id": action_instance.target_id}},
-                    narrative=f"{entity.name} targeted a nonexistent entity ({action_instance.target_id}).",
-                )
-                return
-    # Targeted action with no target supplied -> reject before resolution.
-    if action_def.target_type and target is None:
-        engine._emit_event(
-            "action_failed",
-            actor_id=entity_id,
-            action_name=action_name,
-            data={"reason": "missing_target"},
-            narrative=f"{entity.name} attempted {action_name} without a target.",
-        )
-        return
-
-    # Simultaneous/parallel decisions are collected before resolution. A guard
-    # deferred while listing actions must be checked now with the submitted
-    # parameters, and actor-only guards may have changed since collection.
-    if (not engine.state._check_actor_preconditions(entity, action_def)
-            or not engine._check_target_preconditions(entity, target, action_def, action_instance.parameters)):
-        engine._emit_event('action_failed', actor_id=entity_id,
-            target_id=action_instance.target_id, action_name=action_name,
-            data={'reason': 'preconditions_not_met'},
-            narrative=f'{entity.name} cannot perform {action_name}: preconditions not met.')
-        return
+    target = engine.state.get_entity(action_instance.target_id) if action_instance.target_id else None
 
     # Some domain modules (e.g. Wordle / Hangman / Sudoku Duel) are
     # sealed-tick deduction races and must suppress public chat /

@@ -1,5 +1,6 @@
 """Complete world state -- the runtime state graph."""
 import copy
+from ._snapshot_copy import snapshot_copy
 import hashlib
 import json
 from dataclasses import asdict, dataclass, field
@@ -766,7 +767,7 @@ class WorldState:
     def to_dict(self, *, include_action_history=True) -> dict:
         """Serialize the full state to a dictionary."""
         derived = getattr(self, "_derived_rules", None)
-        return copy.deepcopy({
+        return snapshot_copy({
             "snapshot_version": 2,
             "resource_definitions": {name: asdict(rt) for name, rt in self.resource_types.items()},
             "tables": self.tables,

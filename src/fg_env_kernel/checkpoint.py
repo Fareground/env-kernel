@@ -6,6 +6,8 @@ from collections import deque
 from dataclasses import asdict
 from typing import Any
 
+from ._snapshot_copy import snapshot_copy
+
 from .continuous_time import ContinuousTemporalModel
 from .event import EventLog, SimEvent
 from .invariants import InvariantChecker, WorldInvariant
@@ -78,7 +80,7 @@ def capture(engine: Any, *, external_state=None, include_events=True, include_ac
     # engine/external payload separately so growing world history is not walked
     # and allocated a second time at every checkpoint boundary.
     world = engine.state.to_dict() if include_action_history else engine.state.to_dict(include_action_history=False)
-    checkpoint = copy.deepcopy({
+    checkpoint = snapshot_copy({
         'format': FORMAT if include_action_history else REFERENCED_FORMAT,
         'external_state': external_state,
         'execution': {

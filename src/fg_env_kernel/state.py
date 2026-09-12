@@ -141,6 +141,22 @@ class ActionHistory:
             entities[eid] = {'count': count, 'digest': self._digests.get(eid, self._EMPTY_DIGEST).hex()}
         return {'format': 'fg-action-history-v1', 'entities': entities}
 
+    def verify_reference(self, reference) -> None:
+        """Reject malformed manifests as well as mismatched history contents."""
+        if (not isinstance(reference, dict) or set(reference) != {'format', 'entities'}
+                or reference['format'] != 'fg-action-history-v1'
+                or not isinstance(reference['entities'], dict)):
+            raise ValueError('Invalid action history prefix manifest')
+        for eid, row in reference['entities'].items():
+            if (not isinstance(eid, str) or not isinstance(row, dict)
+                    or set(row) != {'count', 'digest'} or type(row['count']) is not int
+                    or row['count'] < 0 or not isinstance(row['digest'], str)
+                    or len(row['digest']) != 64
+                    or any(c not in '0123456789abcdef' for c in row['digest'])):
+                raise ValueError('Invalid action history prefix manifest')
+        if self.reference() != reference:
+            raise ValueError('checkpoint action history does not match its prefix fingerprint')
+
     def to_dict(self, *, include_records=True) -> dict:
         """Serialize for snapshots."""
         return {

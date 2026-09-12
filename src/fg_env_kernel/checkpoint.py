@@ -131,8 +131,7 @@ def restore(engine: Any, checkpoint: dict, *, event_history=None, action_history
             world_data = copy.deepcopy(world_data)
             world_data['action_history']['history'] = copy.deepcopy(action_history)
             restored_history = ActionHistory.from_dict(world_data['action_history'])
-            if restored_history.reference() != data['action_history']:
-                raise ValueError('checkpoint action history does not match its prefix fingerprint')
+            restored_history.verify_reference(data['action_history'])
         execution = data['execution']
         for key in ('seed', 'max_rounds', 'parallel_decisions'):
             if key == 'max_rounds' and execution[key] is None:

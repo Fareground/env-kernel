@@ -34,7 +34,7 @@ def test_referenced_roundtrip_has_identical_actions_rng_and_results(continuous):
     assert restored._rng.getstate() == baseline._rng.getstate()
 
 
-@pytest.mark.parametrize('corruption', ['missing', 'short', 'long', 'action', 'success', 'round', 'actor', 'inline', 'digest'])
+@pytest.mark.parametrize('corruption', ['missing', 'short', 'long', 'action', 'success', 'round', 'actor', 'inline', 'digest', 'bool_count', 'float_count'])
 def test_wrong_history_is_rejected_without_mutating_live_engine(corruption):
     source = make_engine()
     source.step(); source.step()
@@ -52,6 +52,10 @@ def test_wrong_history_is_rejected_without_mutating_live_engine(corruption):
         checkpoint['world']['action_history']['history'] = history
     elif corruption == 'digest':
         checkpoint['action_history']['entities']['a']['digest'] = '0' * 64
+    elif corruption == 'bool_count':
+        checkpoint['action_history']['entities']['a']['count'] = True
+    elif corruption == 'float_count':
+        checkpoint['action_history']['entities']['a']['count'] = float(len(history['a']))
     else:
         record = history['a'][0]
         record[corruption] = {'action': 'other', 'success': not record['success'], 'round': 999}[corruption]

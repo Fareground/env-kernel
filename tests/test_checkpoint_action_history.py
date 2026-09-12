@@ -106,6 +106,15 @@ def test_default_export_remains_inline_and_detached():
     assert restored.checkpoint() == checkpoint
 
 
+def test_invalid_record_does_not_corrupt_history_or_its_reference():
+    history = ActionHistory()
+    history.record('a', 'try', True, 1)
+    original = history.to_dict(), history.reference()
+    with pytest.raises(ValueError):
+        history.record('a', 'try', True, float('nan'))
+    assert (history.to_dict(), history.reference()) == original
+
+
 def test_external_event_and_action_histories_are_independently_required():
     engine = make_engine()
     engine.step()

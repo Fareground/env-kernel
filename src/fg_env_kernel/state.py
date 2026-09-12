@@ -63,11 +63,12 @@ class ActionHistory:
 
     def record(self, entity_id: str, action_name: str, success: bool, round_num: int):
         """Record an action taken by an entity."""
+        encoded = json.dumps([action_name, success, round_num], ensure_ascii=False,
+                             separators=(',', ':'), allow_nan=False).encode('utf-8')
+        hash(action_name)  # Validate indexability before changing any history.
         if entity_id not in self._history:
             self._history[entity_id] = []
         self._history[entity_id].append(ActionRecord(action_name, success, round_num))
-        encoded = json.dumps([action_name, success, round_num], ensure_ascii=False,
-                             separators=(',', ':'), allow_nan=False).encode('utf-8')
         self._digests[entity_id] = hashlib.sha256(
             self._digests.get(entity_id, self._EMPTY_DIGEST) + encoded).digest()
         self._counts[entity_id] = self._counts.get(entity_id, 0) + 1

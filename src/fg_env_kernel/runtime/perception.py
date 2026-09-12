@@ -82,6 +82,11 @@ def build_perception(
         faction_manager=state.factions,
     )
 
+    active = state.sequences.get_active(entity_id)
+    if active:
+        perception['current_sequence'] = {'action': active.action_name,
+                                          'progress': active.rounds_completed,
+                                          'total': active.total_rounds}
     _add_world_brief(state, perception)
     _add_messages(state, entity_id, perception)
     _add_domain_data(state, entity_id, perception)

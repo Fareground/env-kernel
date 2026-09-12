@@ -926,7 +926,7 @@ class SimulationEngine:
                 agent_tasks.append({"entity_id": entity_id, "crowd": True})
                 continue
             perception, valid_actions = self._build_agent_perception(entity_id)
-            if not valid_actions:
+            if not valid_actions and not self.state.sequences.is_in_sequence(entity_id):
                 continue
             agent_tasks.append({
                 "entity_id": entity_id,
@@ -939,7 +939,7 @@ class SimulationEngine:
 
         # Step 2: collect decisions in parallel. Crowd agents resolve
         # locally; LLM agents fire concurrently.
-        submissions: Dict[str, ActionInstance] = {}
+        submissions: Dict[str, Optional[ActionInstance]] = {}
         sub_lock = threading.Lock()
 
         # Crowd agents run serially first (cheap, no LLM). They were
@@ -957,7 +957,10 @@ class SimulationEngine:
                 return
             eid = task["entity_id"]
             try:
-                action = self.decision_fn(eid, task["perception"], task["valid_actions"]) if self.decision_fn else None
+                from .sequence import committed_action
+                action = committed_action(self, eid)
+                if action is None and self.decision_fn and task['valid_actions']:
+                    action = self.decision_fn(eid, task["perception"], task["valid_actions"])
             except Exception as e:
                 self._running = False
                 logger.error(f"Simultaneous-phase decision failed for {eid}: {e}")
@@ -969,9 +972,8 @@ class SimulationEngine:
                         narrative=f"Decision error for {eid}: {e}",
                     )
                 raise
-            if action is not None:
-                with sub_lock:
-                    submissions[eid] = action
+            with sub_lock:
+                submissions[eid] = action
 
         workers = max(1, self.parallel_decisions or len(agent_tasks))
         # Propagate the caller's contextvars (notably the wallet usage
@@ -1000,10 +1002,9 @@ class SimulationEngine:
         for entity_id in turn_order:
             if not self._running or self._paused:
                 break
-            action = submissions.get(entity_id)
-            if action is None:
+            if entity_id not in submissions:
                 continue
-            self._resolve_and_apply(entity_id, action)
+            self._resolve_and_apply(entity_id, submissions[entity_id])
 
     def _run_phase_parallel(self, turn_order: List[str]):
         """Run agent decisions in parallel micro-batches with fresh perceptions.
@@ -1058,7 +1059,7 @@ class SimulationEngine:
                 if not entity or not entity.alive:
                     continue
                 perception, valid_actions = self._build_agent_perception(entity_id)
-                if not valid_actions:
+                if not valid_actions and not self.state.sequences.is_in_sequence(entity_id):
                     continue
                 agent_tasks.append({
                     "entity_id": entity_id,
@@ -1076,7 +1077,7 @@ class SimulationEngine:
             # would make the price path depend on network timing (a
             # reproducibility hole). We instead resolve in deterministic
             # ``batch`` order below, under the lock.
-            submissions: Dict[str, ActionInstance] = {}
+            submissions: Dict[str, Optional[ActionInstance]] = {}
             sub_lock = threading.Lock()
 
             def _decide(task):
@@ -1084,7 +1085,10 @@ class SimulationEngine:
                     return
                 eid = task["entity_id"]
                 try:
-                    action = self.decision_fn(eid, task["perception"], task["valid_actions"]) if self.decision_fn else None
+                    from .sequence import committed_action
+                    action = committed_action(self, eid)
+                    if action is None and self.decision_fn and task['valid_actions']:
+                        action = self.decision_fn(eid, task["perception"], task["valid_actions"])
                 except Exception as e:
                     self._running = False
                     logger.error(f"Parallel decision failed for {eid}: {e}")
@@ -1099,9 +1103,8 @@ class SimulationEngine:
                             narrative=f"Decision error for {eid}: {e}",
                         )
                     raise
-                if action is not None:
-                    with sub_lock:
-                        submissions[eid] = action
+                with sub_lock:
+                    submissions[eid] = action
 
             import contextvars as _ctxvars
             with ThreadPoolExecutor(max_workers=self.parallel_decisions) as pool:
@@ -1122,9 +1125,8 @@ class SimulationEngine:
             # happen here, just in a reproducible sequence).
             with resolve_lock:
                 for task in agent_tasks:
-                    action = submissions.get(task["entity_id"])
-                    if action is not None:
-                        self._resolve_and_apply(task["entity_id"], action)
+                    if task['entity_id'] in submissions:
+                        self._resolve_and_apply(task['entity_id'], submissions[task['entity_id']])
 
     def _build_agent_perception(self, entity_id: str):
         """Build perception and valid actions for an agent. Returns

@@ -230,9 +230,11 @@ def _resolve_and_apply(engine, entity_id: str, action_instance: ActionInstance):
     if not entity:
         return
 
-    action_def = engine._resolve_action_def(entity, action_instance)
-    if action_def is None:
+    from .sequence import prepare_action
+    prepared = prepare_action(engine, entity, action_instance)
+    if prepared is None:
         return
+    action_instance, action_def = prepared
     action_name = action_instance.action_name
 
     target = engine.state.get_entity(action_instance.target_id) if action_instance.target_id else None

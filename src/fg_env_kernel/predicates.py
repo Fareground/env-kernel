@@ -59,6 +59,25 @@ _MAX_LOGGED_FAILURES = 512
 # Public API
 # ---------------------------------------------------------------------------
 
+def requires_decision_context(predicate: Any) -> bool:
+    """Whether a guard needs a selected target or submitted action parameters.
+
+    This defers only action *listing*, never resolution validation. Recurse into
+    structured predicates too; dictionary membership does not find operands.
+    """
+    if isinstance(predicate, str):
+        return any(kind == _T_EXPR and ("$target" in value or "$params" in value)
+                   for kind, value in _tokenize(predicate))
+    if isinstance(predicate, dict):
+        return (predicate.get('subject') == 'target'
+                or str(predicate.get('op') or predicate.get('operator') or '').lower() in {
+                    'is_adjacent', 'same_faction', 'same_org', 'different_faction', 'relation_gte'}
+                or any(requires_decision_context(value) for value in predicate.values()))
+    if isinstance(predicate, (list, tuple)):
+        return any(requires_decision_context(value) for value in predicate)
+    return False
+
+
 def evaluate(
     predicate: Any,
     *,

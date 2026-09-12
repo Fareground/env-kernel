@@ -559,12 +559,11 @@ class WorldState:
             # Modern: full-expression form. One grammar for every guard.
             expr = getattr(pc, "expr", None)
             if expr:
-                if "$target" in expr:
-                    # Target-side guard: unevaluable before a target is
-                    # chosen (fail-closed would delist every targeted
-                    # action). Resolution re-checks it with the target.
+                from .predicates import evaluate as _predicate_eval, requires_decision_context
+                if requires_decision_context(expr):
+                    # Target/parameter guards cannot be evaluated before the
+                    # decision. Resolution rechecks every guard with its inputs.
                     continue
-                from .predicates import evaluate as _predicate_eval
                 if not _predicate_eval(expr, actor=actor, state=self):
                     return False
                 continue

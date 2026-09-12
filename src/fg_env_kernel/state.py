@@ -1,5 +1,7 @@
 """Complete world state -- the runtime state graph."""
 import copy
+import hashlib
+import json
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -34,7 +36,7 @@ from .cognition import CognitionManager
 from .social import SocialPlatformManager
 
 
-@dataclass
+@dataclass(frozen=True)
 class ActionRecord:
     """A record of an action taken by an entity."""
     action_name: str
@@ -45,17 +47,34 @@ class ActionRecord:
 class ActionHistory:
     """Tracks what actions each entity has taken, for action chain validation."""
 
+    _EMPTY_DIGEST = hashlib.sha256(b'fg-action-history-v1').digest()
+
     def __init__(self):
         self._history: Dict[str, List[ActionRecord]] = {}   # entity_id -> records
         self._unlocked: Dict[str, Set[str]] = {}             # entity_id -> unlocked action names
         self._locked: Dict[str, Set[str]] = {}               # entity_id -> locked action names
         self._cooldowns: Dict[Tuple[str, str], int] = {}     # (entity_id, action_name) -> cooldown_until_round
+        # Records are append-only. Prefix fingerprints and membership indexes
+        # update once per action, never by rescanning an accumulated history.
+        self._digests: Dict[str, bytes] = {}
+        self._counts: Dict[str, int] = {}
+        self._performed: Dict[str, Set[str]] = {}
+        self._succeeded: Dict[str, Set[str]] = {}
 
     def record(self, entity_id: str, action_name: str, success: bool, round_num: int):
         """Record an action taken by an entity."""
+        encoded = json.dumps([action_name, success, round_num], ensure_ascii=False,
+                             separators=(',', ':'), allow_nan=False).encode('utf-8')
+        hash(action_name)  # Validate indexability before changing any history.
         if entity_id not in self._history:
             self._history[entity_id] = []
         self._history[entity_id].append(ActionRecord(action_name, success, round_num))
+        self._digests[entity_id] = hashlib.sha256(
+            self._digests.get(entity_id, self._EMPTY_DIGEST) + encoded).digest()
+        self._counts[entity_id] = self._counts.get(entity_id, 0) + 1
+        self._performed.setdefault(entity_id, set()).add(action_name)
+        if success:
+            self._succeeded.setdefault(entity_id, set()).add(action_name)
 
     def is_available(
         self,
@@ -78,14 +97,8 @@ class ActionHistory:
 
         # Check requires_action
         if action_def.requires_action:
-            history = self._history.get(entity_id, [])
-            found = False
-            for rec in history:
-                if rec.action_name == action_def.requires_action:
-                    if action_def.requires_action_success and not rec.success:
-                        continue
-                    found = True
-                    break
+            actions = self._succeeded if action_def.requires_action_success else self._performed
+            found = action_def.requires_action in actions.get(entity_id, set())
             if not found:
                 # Check if it's been dynamically unlocked
                 unlocked = self._unlocked.get(entity_id, set())
@@ -115,14 +128,44 @@ class ActionHistory:
         """Set a cooldown for an action."""
         self._cooldowns[(entity_id, action_name)] = until_round
 
-    def to_dict(self) -> dict:
+    def reference(self) -> dict:
+        """A detached, verifiable prefix manifest, O(actors), not O(actions).
+
+        The host stores the records once, indexed by these exact prefix counts.
+        Private history storage must not be edited; use record/from_dict.
+        """
+        entities = {}
+        for eid, records in self._history.items():
+            count = self._counts.get(eid, 0)
+            if len(records) != count:
+                raise ValueError('Action history changed outside its append-only interface')
+            entities[eid] = {'count': count, 'digest': self._digests.get(eid, self._EMPTY_DIGEST).hex()}
+        return {'format': 'fg-action-history-v1', 'entities': entities}
+
+    def verify_reference(self, reference) -> None:
+        """Reject malformed manifests as well as mismatched history contents."""
+        if (not isinstance(reference, dict) or set(reference) != {'format', 'entities'}
+                or reference['format'] != 'fg-action-history-v1'
+                or not isinstance(reference['entities'], dict)):
+            raise ValueError('Invalid action history prefix manifest')
+        for eid, row in reference['entities'].items():
+            if (not isinstance(eid, str) or not isinstance(row, dict)
+                    or set(row) != {'count', 'digest'} or type(row['count']) is not int
+                    or row['count'] < 0 or not isinstance(row['digest'], str)
+                    or len(row['digest']) != 64
+                    or any(c not in '0123456789abcdef' for c in row['digest'])):
+                raise ValueError('Invalid action history prefix manifest')
+        if self.reference() != reference:
+            raise ValueError('checkpoint action history does not match its prefix fingerprint')
+
+    def to_dict(self, *, include_records=True) -> dict:
         """Serialize for snapshots."""
         return {
             "history": {
                 eid: [{"action": r.action_name, "success": r.success, "round": r.round_number}
                       for r in records]
                 for eid, records in self._history.items()
-            },
+            } if include_records else None,
             "unlocked": {eid: sorted(actions) for eid, actions in self._unlocked.items()},
             "locked": {eid: sorted(actions) for eid, actions in self._locked.items()},
             "cooldowns": [
@@ -135,14 +178,9 @@ class ActionHistory:
     def from_dict(cls, data: dict) -> "ActionHistory":
         ah = cls()
         for eid, records in data.get("history", {}).items():
-            ah._history[eid] = [
-                ActionRecord(
-                    action_name=r["action"],
-                    success=r["success"],
-                    round_number=r["round"],
-                )
-                for r in records
-            ]
+            ah._history[eid] = []
+            for row in records:
+                ah.record(eid, row['action'], row['success'], row['round'])
         for eid, actions in data.get("unlocked", {}).items():
             ah._unlocked[eid] = set(actions)
         for eid, actions in data.get("locked", {}).items():
@@ -725,7 +763,7 @@ class WorldState:
 
     # -- Snapshot --
 
-    def to_dict(self) -> dict:
+    def to_dict(self, *, include_action_history=True) -> dict:
         """Serialize the full state to a dictionary."""
         derived = getattr(self, "_derived_rules", None)
         return copy.deepcopy({
@@ -740,7 +778,7 @@ class WorldState:
             "entity_types": list(self.entity_types.keys()),
             "action_definitions": list(self.action_definitions.keys()),
             "status_effects": self.status_effects.to_dict(),
-            "action_history": self.action_history.to_dict(),
+            "action_history": self.action_history.to_dict(include_records=include_action_history),
             "factions": self.factions.to_dict(),
             "sequences": self.sequences.to_dict(),
             "messages": self.messages.to_dict(),

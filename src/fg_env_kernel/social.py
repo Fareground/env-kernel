@@ -517,13 +517,17 @@ class SocialPlatformManager:
         data = {
             "social_feed": [
                 {
+                    "id": item.id,
                     "author": item.author_id,
-                    "text": item.text[:100],
+                    # The host may render a bounded preview, but must be able
+                    # to retain/recover the complete visible source.
+                    "text": item.text,
                     "type": item.content_type.value,
                     "engagement": item.total_engagement(),
                 }
                 for item in feed_items
             ],
+            "feed_selection": "Up to five posts from this participant's visible feed, not the complete platform history.",
             "follower_count": len(followers),
             "following_count": len(following),
             "influence_score": self.social_graph.get_influence_score(entity_id),
@@ -553,6 +557,10 @@ class SocialPlatformManager:
             "reputation": self.reputation.to_dict() if self.reputation else None,
             "viral_model": self.viral_model.to_dict(),
             "content": {cid: c.to_dict() for cid, c in self._content.items()},
+            # Preserve private feed membership/order using references, not
+            # another full copy of each post per participant.
+            "feeds": {eid: {"max_items": feed._max_items, "items": [item.id for item in feed._items]}
+                      for eid, feed in self._feeds.items()},
             "pending_content": list(self._pending_content),
         }
 
@@ -568,5 +576,12 @@ class SocialPlatformManager:
             mgr.reputation = ReputationSystem.from_dict(data["reputation"])
         for cid, cdata in data.get("content", {}).items():
             mgr._content[cid] = ContentItem.from_dict(cdata)
+        for eid, row in data.get("feeds", {}).items():
+            feed = Feed(max_items=row["max_items"])
+            try:
+                feed._items = [mgr._content[cid] for cid in row["items"]]
+            except KeyError as exc:
+                raise ValueError("Social feed references an unavailable source") from exc
+            mgr._feeds[eid] = feed
         mgr._pending_content = data.get("pending_content", [])
         return mgr

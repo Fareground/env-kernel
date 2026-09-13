@@ -320,6 +320,43 @@ class TestSocialPlatformManager:
         mgr.remove_entity("a")
         assert "a" not in mgr.social_graph.get_following("a")
 
+    def test_perception_preserves_complete_visible_text_and_stable_source_id(self):
+        mgr = SocialPlatformManager()
+        text = 'Visible context ' * 100 + 'Important final condition.'
+        post = mgr.create_content('a', text)
+        private = mgr.create_content('other', 'Unseen private source')
+        data = mgr.get_perception_data('a')
+        assert data['social_feed'][0]['text'] == text
+        assert data['social_feed'][0]['id'] == post.id
+        assert private.id not in {item['id'] for item in data['social_feed']}
+        assert 'not the complete platform history' in data['feed_selection']
+        restored = SocialPlatformManager.from_dict(mgr.to_dict())
+        assert restored.get_perception_data('a') == data
+
+    def test_complete_text_does_not_expand_visible_feed_selection(self):
+        mgr = SocialPlatformManager()
+        for index in range(20):
+            mgr.create_content('a', f'Post {index}: ' + 'long content ' * 50)
+        expected = mgr.get_feed('a', limit=5)
+        actual = mgr.get_perception_data('a')['social_feed']
+        assert len(actual) == 5
+        assert [(item['id'], item['text']) for item in actual] == [(item.id, item.text) for item in expected]
+
+    def test_feed_checkpoint_keeps_order_capacity_and_shared_source_references(self):
+        mgr = SocialPlatformManager()
+        for index in range(60):
+            mgr.create_content('a', f'Post {index}')
+        snapshot = mgr.to_dict()
+        assert len(snapshot['feeds']['a']['items']) == 50
+        assert all(isinstance(ident, str) for ident in snapshot['feeds']['a']['items'])
+        restored = SocialPlatformManager.from_dict(snapshot)
+        assert [item.id for item in restored.get_feed('a', 50)] == [item.id for item in mgr.get_feed('a', 50)]
+        newest = restored.get_feed('a', 1)[0]
+        assert newest is restored.get_content(newest.id)
+        restored.react_to_content('b', newest.id, 'like')
+        assert restored.get_feed('a', 1)[0].total_engagement() == 1
+        assert mgr.get_feed('a', 1)[0].total_engagement() == 0
+
     def test_serialization(self):
         mgr = SocialPlatformManager()
         mgr.social_graph.follow("a", "b")

@@ -110,6 +110,14 @@ def _invoke_action(ctx: EffectContext, spec: Dict[str, Any]) -> Any:
                  action_name=action_name, data={**sub_result.details,
                     "visible_to": [actor.id] if actor else []},
                  narrative=sub_result.narrative)
+    elif ctx.emit:
+        # Composed/autonomous actions do not pass through the participant
+        # decision loop. Record successful execution distinctly so diagnostics
+        # can count it without fabricating an agent decision or broadening the
+        # visibility used for failed invocations above.
+        ctx.emit("action_invoked", actor_id=actor.id if actor else None,
+                 action_name=action_name,
+                 data={"visible_to": [actor.id] if actor else []})
     return sub_changes if isinstance(sub_changes, list) else None
 
 

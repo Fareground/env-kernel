@@ -207,7 +207,7 @@ def smoke_test(
             detail = dict(ev["data"])
             if detail not in invalid_effects:
                 invalid_effects.append(detail)
-        if et == "action_resolved":
+        if et in {"action_resolved", "action_invoked"}:
             name = ev.get("action_name")
             if name:
                 actions_taken[name] += 1

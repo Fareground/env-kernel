@@ -212,7 +212,10 @@ def smoke_test(
             if name:
                 actions_taken[name] += 1
         elif et == "simulation_terminated":
-            tc = (ev.get("data") or {}).get("condition_name")
+            # Both engine modes emit `condition`. The old field name made
+            # successful horizon checks look unreachable to authoring agents.
+            data = ev.get("data") or {}
+            tc = data.get("condition") or data.get("condition_name")
             if tc:
                 terminated_by[0] = tc
 

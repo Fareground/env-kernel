@@ -12,6 +12,7 @@ import ast
 import math
 import operator
 import re
+from decimal import Decimal, localcontext
 from typing import Any
 
 from .effects import _call_function, _split_args_top_level, _walk_path
@@ -31,6 +32,14 @@ def number(value: Any) -> int | float:
     if not finite:
         raise EffectValueError(f"expected a finite number, got {value!r}")
     return value
+
+
+def _decimal_number(value: Any) -> Decimal:
+    if isinstance(value, Decimal):
+        if not value.is_finite() or not math.isfinite(float(value)):
+            raise EffectValueError("expected a finite decimal number")
+        return value
+    return Decimal(str(number(value)))
 
 
 def expression_source(value: Any) -> str | None:
@@ -87,7 +96,9 @@ def _reference(src: str, start: int) -> tuple[tuple[str, str | None, str], int]:
     return (name, args, path.lstrip(".")), path_match.end()
 
 
-def _parse(src: str, depth: int = 0) -> tuple[ast.AST, dict[str, tuple[str, str | None, str]]]:
+def _parse(src: str, depth: int = 0, *, decimal: bool = False) -> tuple[
+    ast.AST, dict[str, tuple[str, str | None, str]], dict[ast.Constant, Decimal]
+]:
     if len(src) > 16_384 or depth > 64:
         raise EffectValueError("effect expression is too long or deeply nested")
     refs: dict[str, tuple[str, str | None, str]] = {}
@@ -114,8 +125,9 @@ def _parse(src: str, depth: int = 0) -> tuple[ast.AST, dict[str, tuple[str, str 
             continue
         parts.append(char)
         i += 1
+    normalized = "".join(parts)
     try:
-        tree = ast.parse("".join(parts), mode="eval").body
+        tree = ast.parse(normalized, mode="eval").body
     except (SyntaxError, RecursionError) as exc:
         raise EffectValueError(f"invalid effect expression {src!r}") from exc
     # Validate the whole tree, even branches that will not be evaluated.
@@ -126,11 +138,20 @@ def _parse(src: str, depth: int = 0) -> tuple[ast.AST, dict[str, tuple[str, str 
     nodes = list(ast.walk(tree))
     if len(nodes) > 1024 or any(not isinstance(node, allowed) for node in nodes):
         raise EffectValueError("unsupported effect expression syntax")
+    decimal_literals: dict[ast.Constant, Decimal] = {}
+    if decimal:
+        # Use the authored literal, not the already-rounded AST float. This
+        # must not let 0.300000000000000000001 silently become an affordable 0.3.
+        for node in nodes:
+            if isinstance(node, ast.Constant) and type(node.value) is float:
+                literal = ast.get_source_segment(normalized, node)
+                assert literal is not None
+                decimal_literals[node] = _decimal_number(Decimal(literal.replace("_", "")))
     for _, args, _ in refs.values():
         if args is not None:
             for arg in _split_args_top_level(args):
                 _parse(arg.strip(), depth + 1)
-    return tree, refs
+    return tree, refs, decimal_literals
 
 
 def validate_operand(value: Any, *, numeric: bool = False) -> None:
@@ -154,8 +175,29 @@ def resolve_value(value: Any, **context: Any) -> Any:
         raise EffectValueError(f"cannot evaluate {src!r}: {exc}") from exc
 
 
-def _evaluate(src: str, context: dict[str, Any], *, allow_missing: bool = False) -> Any:
-    tree, refs = _parse(src)
+def resolve_decimal(value: Any, **context: Any) -> Decimal:
+    """Exact decimal transfer arithmetic, without changing ordinary effects.
+
+    State stays int/float. This only keeps the amount expression decimal until
+    the ledger validates all balances and converts its committed values once.
+    Random/external function results retain their original sampled precision.
+    """
+    src = expression_source(value)
+    try:
+        with localcontext() as decimal_context:
+            decimal_context.prec = 700
+            return _decimal_number(_evaluate(src, context, decimal=True) if src is not None else value)
+    except EffectValueError:
+        raise
+    except (ArithmeticError, TypeError, ValueError, KeyError, RecursionError) as exc:
+        raise EffectValueError("cannot evaluate decimal transfer amount") from exc
+
+
+def _evaluate(src: str, context: dict[str, Any], *, allow_missing: bool = False, decimal: bool = False) -> Any:
+    tree, refs, decimal_literals = _parse(src, decimal=decimal)
+
+    def numeric(value: Any) -> Any:
+        return _decimal_number(value) if decimal else number(value)
 
     def reference(ref: tuple[str, str | None, str]) -> Any:
         name, args_src, path = ref
@@ -170,12 +212,12 @@ def _evaluate(src: str, context: dict[str, Any], *, allow_missing: bool = False)
             if name == "if":
                 if len(args) != 3:
                     raise EffectValueError("$if requires condition, true value, false value")
-                condition = _evaluate(args[0], context)
+                condition = _evaluate(args[0], context, decimal=decimal)
                 if not isinstance(condition, bool):
                     raise EffectValueError("$if condition must resolve to a boolean")
-                value = _evaluate(args[1 if condition else 2], context)
+                value = _evaluate(args[1 if condition else 2], context, decimal=decimal)
             else:
-                resolved = [_evaluate(arg, context, allow_missing=name == "first") for arg in args]
+                resolved = [_evaluate(arg, context, allow_missing=name == "first", decimal=decimal) for arg in args]
                 if name == "entity":
                     if len(resolved) != 1 or context.get("state") is None:
                         raise EffectValueError("$entity requires an entity id and world state")
@@ -184,8 +226,21 @@ def _evaluate(src: str, context: dict[str, Any], *, allow_missing: bool = False)
                     # Numeric helpers must not silently discard invalid arguments.
                     if name in {"min", "max", "sum", "avg", "abs", "random", "random_float", "dice"}:
                         for arg in resolved:
-                            number(arg)
-                    value = _call_function(name, resolved, state=context.get("state"), rng=context.get("rng"))
+                            numeric(arg)
+                    if decimal and name in {"min", "max", "sum", "avg", "abs"}:
+                        nums = [_decimal_number(arg) for arg in resolved]
+                        if name == "min":
+                            value = min(nums) if nums else None
+                        elif name == "max":
+                            value = max(nums) if nums else None
+                        elif name == "abs":
+                            value = abs(nums[0]) if nums else Decimal(0)
+                        else:
+                            value = sum(nums, Decimal(0))
+                            if name == "avg" and nums:
+                                value /= len(nums)
+                    else:
+                        value = _call_function(name, resolved, state=context.get("state"), rng=context.get("rng"))
         if path:
             if any(part.startswith("_") for part in path.split(".")):
                 raise EffectValueError("private attribute paths are not effect values")
@@ -196,7 +251,7 @@ def _evaluate(src: str, context: dict[str, Any], *, allow_missing: bool = False)
 
     def walk(node: ast.AST) -> Any:
         if isinstance(node, ast.Constant):
-            return node.value
+            return decimal_literals.get(node, node.value)
         if isinstance(node, ast.Name):
             if node.id in refs:
                 return reference(refs[node.id])
@@ -204,17 +259,22 @@ def _evaluate(src: str, context: dict[str, Any], *, allow_missing: bool = False)
         if isinstance(node, (ast.List, ast.Tuple)):
             return [walk(item) for item in node.elts]
         if isinstance(node, ast.BinOp):
-            left, right = number(walk(node.left)), number(walk(node.right))
+            left, right = numeric(walk(node.left)), numeric(walk(node.right))
             if isinstance(node.op, ast.Pow) and abs(right) > 1024:
                 raise EffectValueError("effect exponent is too large")
-            return number(_BINARY[type(node.op)](left, right))
+            value = numeric(_BINARY[type(node.op)](left, right))
+            # Decimal remainder follows the dividend; the expression language
+            # uses Python's modulo (divisor sign), including negative inputs.
+            if decimal and isinstance(node.op, ast.Mod) and value and (value < 0) != (right < 0):
+                value += right
+            return value
         if isinstance(node, ast.UnaryOp):
             item = walk(node.operand)
             if isinstance(node.op, ast.Not):
                 if not isinstance(item, bool):
                     raise EffectValueError("not requires a boolean")
                 return not item
-            return number(item) * (-1 if isinstance(node.op, ast.USub) else 1)
+            return numeric(item) * (-1 if isinstance(node.op, ast.USub) else 1)
         if isinstance(node, ast.BoolOp):
             for item in node.values:
                 result = walk(item)
@@ -229,7 +289,10 @@ def _evaluate(src: str, context: dict[str, Any], *, allow_missing: bool = False)
             left = walk(node.left)
             for op, rhs in zip(node.ops, node.comparators):
                 right = walk(rhs)
-                if not _COMPARE[type(op)](left, right):
+                a, b = left, right
+                if decimal and type(a) in (int, float, Decimal) and type(b) in (int, float, Decimal):
+                    a, b = numeric(a), numeric(b)
+                if not _COMPARE[type(op)](a, b):
                     return False
                 left = right
             return True

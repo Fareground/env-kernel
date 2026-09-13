@@ -172,6 +172,65 @@ def test_decimal_boundary_does_not_spuriously_overdraw():
     assert balances(result.state) == {"buyer": 0, "seller": 0.3}
 
 
+@pytest.mark.parametrize("expression", [
+    "0.1 * 3", "0.1 + 0.2", "$params.price * $params.quantity",
+    "$sum(0.1, 0.2)", "$avg(0.2, 0.4)",
+    "$if($params.price * 3 == 0.3, 0.3, 1)",
+    "$max(0.1 * 3, 0.2)", "-(-0.1 * 3)",
+    "(-0.1 % 0.3) + 0.1", "$abs(0.1 % -0.3) + 0.1",
+    "0.03 / 0.1", "3e-1", "$first($params.missing, 0.1 * 3)",
+])
+def test_transfer_expression_keeps_decimal_arithmetic_until_settlement(expression):
+    result = compiled(world(0.3))
+    result.state.entities["seller"].set("cash", 0)
+    settle_transfers(result.state, [{"source": "buyer", "target": "seller",
+        "field": "cash", "amount": {"expr": expression}}], None, None,
+        {"price": 0.1, "quantity": 3})
+    assert balances(result.state) == {"buyer": 0, "seller": 0.3}
+
+
+@pytest.mark.parametrize("mode", ["sequential", "simultaneous"])
+def test_exact_decimal_expression_runs_success_effects(mode):
+    result = compiled(world(0.3, amount={"expr": "0.1 * 3"}, mode=mode))
+    result.state.entities["seller"].set("cash", 0)
+    result.engine.run()
+    assert balances(result.state) == {"buyer": 0, "seller": 0.3}
+    assert result.state.entities["buyer"].get("paid") is True
+
+
+def test_decimal_expression_cannot_round_an_actual_overdraft_down():
+    result = compiled(world(0.3, amount={"expr": "0.300000000000000000001"}))
+    result.state.entities["seller"].set("cash", 0)
+    result.engine.run()
+    assert balances(result.state) == {"buyer": 0.3, "seller": 0}
+    assert result.state.entities["buyer"].get("paid") is False
+
+
+def test_ordinary_effect_arithmetic_keeps_existing_float_semantics():
+    from fg_env_kernel.effect_values import resolve_value
+    assert resolve_value({"expr": "0.1 * 3"}) == 0.1 * 3
+
+
+@pytest.mark.parametrize("cents,quantity", [(1, 3), (7, 9), (10, 3), (29, 7), (99, 100)])
+@pytest.mark.parametrize("short", [False, True])
+def test_decimal_prices_match_an_independent_exact_balance_oracle(cents, quantity, short):
+    from decimal import Decimal
+    price = Decimal(cents) / 100
+    amount = price * quantity
+    initial = amount - (Decimal("0.01") if short else 0)
+    result = compiled(world(float(initial)))
+    result.state.entities["seller"].set("cash", 0)
+    transfers = [{"source": "buyer", "target": "seller", "field": "cash",
+                  "amount": {"expr": "$params.price * $params.quantity"}}]
+    if short:
+        with pytest.raises(TransferError, match="insufficient_transfer_balance"):
+            settle_transfers(result.state, transfers, None, None, {"price": float(price), "quantity": quantity})
+        assert balances(result.state) == {"buyer": float(initial), "seller": 0}
+    else:
+        settle_transfers(result.state, transfers, None, None, {"price": float(price), "quantity": quantity})
+        assert balances(result.state) == {"buyer": 0, "seller": float(amount)}
+
+
 def test_transfer_too_small_for_float_precision_is_rejected():
     result = compiled(world(1e20, amount=0.01))
     result.engine.run()

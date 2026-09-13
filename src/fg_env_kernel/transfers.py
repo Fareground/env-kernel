@@ -8,7 +8,7 @@ from __future__ import annotations
 from decimal import Decimal, localcontext
 from typing import TYPE_CHECKING, Any
 
-from .effect_values import EffectValueError, number, resolve_value
+from .effect_values import EffectValueError, number, resolve_decimal, resolve_value
 from .types import PropertyType
 
 if TYPE_CHECKING:
@@ -78,12 +78,12 @@ def settle_transfers(state: WorldState, transfers: list[dict[str, Any]],
                 destination = account(transfer.get("target", "target"), field)
                 if source == destination:
                     raise TransferError("same_transfer_account")
-                amount = number(resolve_value(transfer.get("amount"), **context))
+                amount = resolve_decimal(transfer.get("amount"), **context)
                 if amount < 0:
                     raise TransferError("negative_transfer_amount")
                 if any(accounts[key][1].type == PropertyType.INT for key in (source, destination)) and amount != int(amount):
                     raise TransferError("fractional_integer_transfer")
-                debit = Decimal(str(amount))
+                debit = amount
                 deltas[source] -= debit
                 deltas[destination] += debit
 

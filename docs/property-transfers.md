@@ -33,6 +33,15 @@ settle together. The kernel aggregates account deltas and validates every final
 balance before writing any of them. Incoming amounts may fund outgoing amounts
 in this atomic settlement. There are no intermediate balances or clamps.
 
+Transfer amount arithmetic uses decimal values through settlement. For example,
+`{"expr": "$params.price * $params.quantity"}` with price `0.10` and quantity `3`
+can consume an exact `0.30` balance. Decimal literals, arithmetic and numeric
+`$min`, `$max`, `$sum`, `$avg`, `$abs` helpers are not rounded to binary floats
+before the balance check. A genuinely larger amount is still rejected, without
+an affordability tolerance. Existing state values and sampled/external function
+results retain their stored precision; this cannot repair an earlier incorrect
+state mutation. Ordinary effects and action/rule predicates are unchanged.
+
 The default lower bound is zero; an explicitly declared negative `min_value`
 permits modeled credit. Declared upper bounds enforce account capacity. Invalid
 references, missing/nonfinite/negative amounts, fractional transfers involving
